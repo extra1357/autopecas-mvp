@@ -1,0 +1,28 @@
+{
+  "name": "autopecas-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "yarn workspace @autopecas/api dev",
+    "dev:web": "yarn workspace @autopecas/web dev",
+    "dev:worker": "yarn workspace @autopecas/worker dev",
+    "build:api": "yarn workspace @autopecas/api build",
+    "build:web": "yarn workspace @autopecas/web build",
+    "db:generate": "yarn workspace @autopecas/api prisma:generate",
+    "db:migrate": "yarn workspace @autopecas/api prisma:migrate",
+    "db:studio": "yarn workspace @autopecas/api prisma:studio"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "prettier": "^3.2.0",
+    "eslint": "^8.57.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "yarn": ">=1.22.0"
+  }
+}

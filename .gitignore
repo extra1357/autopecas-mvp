@@ -1,0 +1,28 @@
+# Env
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+
+# Prisma
+prisma/migrations/dev/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+docker-compose.override.yml

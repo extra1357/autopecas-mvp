@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// CLIENTE
+// ─────────────────────────────────────────
+model Cliente {
+  id        String   @id @default(uuid())
+  nome      String?
+  telefone  String   @unique
+  endereco  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversas  Conversa[]
+  pedidos    Pedido[]
+
+  @@map("clientes")
+}
+
+// ─────────────────────────────────────────
+// CONVERSA
+// ─────────────────────────────────────────
+enum StatusConversa {
+  ATIVA
+  AGUARDANDO_HUMANO
+  EM_ATENDIMENTO
+  FINALIZADA
+  EXPIRADA
+}
+
+enum EstadoConversa {
+  INICIO
+  AGUARDANDO_PECA
+  AGUARDANDO_VEICULO
+  CONSULTANDO_ESTOQUE
+  AGUARDANDO_ENDERECO
+  AGUARDANDO_PAGAMENTO
+  AGUARDANDO_VENDEDOR
+  FINALIZADO
+}
+
+model Conversa {
+  id          String         @id @default(uuid())
+  clienteId   String
+  estadoAtual EstadoConversa @default(INICIO)
+  status      StatusConversa @default(ATIVA)
+  contexto    Json           @default("{}")
+  expiresAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  cliente    Cliente      @relation(fields: [clienteId], references: [id])
+  mensagens  Mensagem[]
+  pedidos    Pedido[]
+  atendimento Atendimento?
+  logs       LogConversa[]
+
+  @@map("conversas")
+}
+
+// ─────────────────────────────────────────
+// MENSAGEM
+// ─────────────────────────────────────────
+enum OrigemMensagem {
+  CLIENTE
+  IA
+  HUMANO
+  SISTEMA
+}
+
+model Mensagem {
+  id          String         @id @default(uuid())
+  conversaId  String
+  origem      OrigemMensagem
+  conteudo    String
+  metadata    Json?
+  timestamp   DateTime       @default(now())
+
+  conversa Conversa @relation(fields: [conversaId], references: [id])
+
+  @@map("mensagens")
+}
+
+// ─────────────────────────────────────────
+// PRODUTO / PEÇA
+// ─────────────────────────────────────────
+model Produto {
+  id         String   @id @default(uuid())
+  codigo     String   @unique
+  nome       String
+  aplicacao  String?
+  marca      String?
+  estoque    Int      @default(0)
+  preco      Decimal  @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  itensPedido ItemPedido[]
+
+  @@map("produtos")
+}
+
+// ─────────────────────────────────────────
+// PEDIDO
+// ─────────────────────────────────────────
+enum StatusPedido {
+  RASCUNHO
+  AGUARDANDO_PAGAMENTO
+  PAGO
+  SEPARANDO
+  ENVIADO
+  ENTREGUE
+  CANCELADO
+}
+
+enum TipoEntrega {
+  DELIVERY
+  RETIRADA
+}
+
+enum TipoPagamento {
+  PIX
+  CARTAO
+  DINHEIRO
+  BOLETO
+}
+
+model Pedido {
+  id           String        @id @default(uuid())
+  clienteId    String
+  conversaId   String?
+  status       StatusPedido  @default(RASCUNHO)
+  tipoEntrega  TipoEntrega?
+  pagamento    TipoPagamento?
+  total        Decimal?      @db.Decimal(10, 2)
+  endereco     String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  cliente Cliente     @relation(fields: [clienteId], references: [id])
+  conversa Conversa?  @relation(fields: [conversaId], references: [id])
+  itens   ItemPedido[]
+
+  @@map("pedidos")
+}
+
+model ItemPedido {
+  id         String  @id @default(uuid())
+  pedidoId   String
+  produtoId  String
+  quantidade Int
+  precoUnit  Decimal @db.Decimal(10, 2)
+
+  pedido  Pedido  @relation(fields: [pedidoId], references: [id])
+  produto Produto @relation(fields: [produtoId], references: [id])
+
+  @@map("itens_pedido")
+}
+
+// ─────────────────────────────────────────
+// ATENDIMENTO / HANDOFF
+// ─────────────────────────────────────────
+enum StatusAtendimento {
+  PENDENTE
+  EM_ANDAMENTO
+  RESOLVIDO
+  EXPIRADO
+}
+
+enum PrioridadeAtendimento {
+  BAIXA
+  MEDIA
+  ALTA
+  URGENTE
+}
+
+model Atendimento {
+  id          String                @id @default(uuid())
+  conversaId  String                @unique
+  vendedorId  String?
+  status      StatusAtendimento     @default(PENDENTE)
+  prioridade  PrioridadeAtendimento @default(MEDIA)
+  resumo      String?
+  slaMinutos  Int                   @default(30)
+  iniciadoEm  DateTime?
+  resolvidoEm DateTime?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  conversa Conversa @relation(fields: [conversaId], references: [id])
+
+  @@map("atendimentos")
+}
+
+// ─────────────────────────────────────────
+// LOG / AUDITORIA
+// ─────────────────────────────────────────
+model LogConversa {
+  id         String   @id @default(uuid())
+  conversaId String
+  tipo       String
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  conversa Conversa @relation(fields: [conversaId], references: [id])
+
+  @@map("logs_conversa")
+}
