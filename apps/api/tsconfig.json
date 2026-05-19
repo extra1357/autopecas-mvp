@@ -16,13 +16,7 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "forceConsistentCasingInFileNames": false,
-    "noFallthroughCasesInSwitch": false,
-    "paths": {
-      "@autopecas/core": ["../../packages/core/src"],
-      "@autopecas/workflows": ["../../packages/workflows/src"],
-      "@autopecas/ai": ["../../packages/ai/src"],
-      "@autopecas/integrations": ["../../packages/integrations/src"]
-    }
+    "noFallthroughCasesInSwitch": false
   },
   "include": ["src/**/*", "prisma/**/*"],
   "exclude": ["node_modules", "dist"]
