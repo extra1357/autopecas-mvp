@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 
-const API = 'http://localhost:3001/api';
+const API = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api` : 'http://localhost:3001/api';
 
 type Prioridade = 'BAIXA' | 'MEDIA' | 'ALTA' | 'URGENTE';
 type Status = 'PENDENTE' | 'EM_ANDAMENTO' | 'RESOLVIDO';
