@@ -53,14 +53,14 @@ export class ConversasService {
       .map(m => `${m.origem}: ${m.conteudo}`);
 
     // 5. Classifica intent com IA
-    const intentResult = await this.ai.classificarMensagem(mensagem, historico);
+    const intentResult = await this.ai.processarMensagem(mensagem, historico);
 
     // 6. Resposta direta para saudações/despedidas
-    if (intentResult.resposta_direta && intentResult.confianca > 0.8) {
+    if (intentResult.resposta && intentResult.confianca > 0.8) {
       await this.prisma.mensagem.create({
-        data: { conversaId: conversa.id, origem: 'IA', conteudo: intentResult.resposta_direta },
+        data: { conversaId: conversa.id, origem: 'IA', conteudo: intentResult.resposta },
       });
-      return intentResult.resposta_direta;
+      return intentResult.resposta;
     }
 
     // 7. Handoff direto se cliente pediu vendedor

@@ -24,7 +24,7 @@ export class AiService {
     this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   }
 
-  async processarMensagem(mensagem: string): Promise<IntentResult> {
+  async processarMensagem(mensagem: string, historico: string[] = []): Promise<IntentResult> {
     this.logger.log('Processando: ' + mensagem);
     const prompt = 'Analise a mensagem de um cliente de autopeças e retorne APENAS JSON.\n\nIntents: buscar_peca, consultar_preco, consultar_estoque, entrega, retirada, falar_vendedor, status_pedido, saudacao, outro\n\nFormato: {"intent":"buscar_peca","entidades":{"peca":"amortecedor","veiculo":"HB20","ano":"2021","marca":"Hyundai","pagamento":null,"entrega":null},"confianca":0.95,"resposta":"Texto para o cliente"}\n\nMensagem: "' + mensagem + '"';
     try {
