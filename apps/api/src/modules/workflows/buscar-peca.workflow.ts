@@ -1,121 +1,72 @@
+﻿import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Workflow, WorkflowContext, WorkflowResult } from './workflow.engine';
+import { InventoryService } from '../inventory/inventory.service';
+import { WorkflowEngine, WorkflowContext, WorkflowResult } from './workflow.engine';
 
-export class BuscarPecaWorkflow implements Workflow {
-  nome = 'BuscarPecaWorkflow';
-  intents = ['buscar_peca', 'consultar_preco', 'consultar_estoque'];
+@Injectable()
+export class BuscarPecaWorkflow implements OnModuleInit {
+  private readonly logger = new Logger(BuscarPecaWorkflow.name);
+  readonly nome = 'BuscarPecaWorkflow';
+  readonly intents = ['buscar_peca', 'consultar_preco', 'consultar_estoque'];
+
+  constructor(
+    private inventory: InventoryService,
+    private engine: WorkflowEngine,
+  ) {}
+
+  onModuleInit() {
+    this.engine.registrar(this);
+  }
 
   async executar(ctx: WorkflowContext, prisma: PrismaService): Promise<WorkflowResult> {
-    const { peca, veiculo, ano, pagamento, entrega } = ctx.entidades;
+    const { peca, veiculo, ano } = ctx.entidades;
 
-    // 1. Valida dados mínimos
     if (!peca) {
       return {
-        resposta: 'Qual peça você precisa? Ex: amortecedor, pastilha de freio, filtro de óleo...',
+        resposta: 'Qual peca voce precisa? Ex: amortecedor, pastilha de freio, filtro de oleo...',
         novoEstado: 'AGUARDANDO_PECA',
-        acoes: ['SOLICITAR_PECA'],
+        acoes: ['SOLICITOU_PECA'],
         handoff: { necessario: false },
       };
     }
 
-    if (!veiculo) {
-      return {
-        resposta: `Para encontrar *${peca}* no estoque, preciso saber o veículo. Qual é o modelo e ano?`,
-        novoEstado: 'AGUARDANDO_VEICULO',
-        acoes: ['SOLICITAR_VEICULO'],
-        handoff: { necessario: false },
-      };
-    }
+    this.logger.log(`Buscando: ${peca} | ${veiculo} | ${ano}`);
+    const produtos = await this.inventory.buscarPeca(peca, veiculo, ano);
 
-    // 2. Consulta estoque
-    const termos = peca.toLowerCase().split(' ');
-    const produtos = await prisma.produto.findMany({
-      where: {
-        OR: [
-          { nome: { contains: termos[0], mode: 'insensitive' } },
-          { aplicacao: { contains: veiculo, mode: 'insensitive' } },
-          { codigo: { contains: termos[0], mode: 'insensitive' } },
-        ],
-        estoque: { gt: 0 },
-      },
-      take: 3,
-      orderBy: { preco: 'asc' },
-    });
-
-    // 3. Sem estoque — handoff ou similar
-    if (produtos.length === 0) {
-      return {
-        resposta: `Não encontrei *${peca}* para *${veiculo}* no estoque agora. Vou verificar com nossa equipe se conseguimos em outro fornecedor.`,
-        novoEstado: 'AGUARDANDO_VENDEDOR',
-        acoes: ['ESTOQUE_ZERADO', 'SOLICITAR_HANDOFF'],
-        handoff: {
-          necessario: true,
-          motivo: `Peça não encontrada no estoque: ${peca} para ${veiculo}`,
-          prioridade: 'MEDIA',
-        },
-      };
-    }
-
-    // 4. Produto encontrado
-    const produto = produtos[0];
-    const preco = Number(produto.preco).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-    // 5. Ticket alto → handoff
-    if (Number(produto.preco) > 500) {
-      return {
-        resposta: `Encontrei *${produto.nome}* por *${preco}*.\n\nPor ser um item de maior valor, vou acionar um especialista para te atender com mais atenção. Aguarde!`,
-        novoEstado: 'AGUARDANDO_VENDEDOR',
-        acoes: ['PRODUTO_ENCONTRADO', 'TICKET_ALTO', 'SOLICITAR_HANDOFF'],
-        handoff: {
-          necessario: true,
-          motivo: `Ticket alto: ${produto.nome} — ${preco}`,
-          prioridade: 'ALTA',
-        },
-      };
-    }
-
-    // 6. Pergunta sobre entrega
-    if (!entrega) {
-      let msg = `✅ Temos *${produto.nome}* em estoque!\n`;
-      msg += `💰 Preço: *${preco}*\n`;
-      msg += `📦 Estoque: ${produto.estoque} unidade(s)\n\n`;
-      msg += `Você prefere *entrega* ou *retirada na loja*?`;
-
-      if (produtos.length > 1) {
-        msg += `\n\n_Também temos outras opções disponíveis caso queira comparar._`;
-      }
+    if (produtos.length > 0) {
+      const p = produtos[0];
+      const disponibilidade = p.estoque > 0 ? `${p.estoque} em estoque` : 'ultimo disponivel';
+      const outros = produtos.length > 1 ? ` Tambem temos mais ${produtos.length - 1} opcao(oes).` : '';
 
       return {
-        resposta: msg,
+        resposta: `Encontrei! *${p.nome}* (${p.marca}) para ${p.aplicacao}.\nPreco: *R$ ${p.preco.toFixed(2)}* | ${disponibilidade}.${outros}\n\nQuer delivery ou retirada na loja?`,
         novoEstado: 'AGUARDANDO_ENDERECO',
-        acoes: ['PRODUTO_ENCONTRADO', 'SOLICITAR_ENTREGA'],
+        acoes: ['PECA_ENCONTRADA'],
         handoff: { necessario: false },
       };
     }
 
-    // 7. Pergunta sobre pagamento
-    if (!pagamento) {
+    const similares = await this.inventory.buscarSimilares(peca);
+
+    if (similares.length > 0) {
+      const nomes = similares.map(s => `- ${s.nome} para ${s.aplicacao} | R$ ${s.preco.toFixed(2)}`).join('\n');
       return {
-        resposta: `Perfeito! *${entrega === 'delivery' ? 'Entrega' : 'Retirada'}* confirmada.\n\nQual a forma de pagamento? PIX, cartão ou dinheiro?`,
-        novoEstado: 'AGUARDANDO_PAGAMENTO',
-        acoes: ['ENTREGA_CONFIRMADA', 'SOLICITAR_PAGAMENTO'],
+        resposta: `Nao encontrei *${peca}* para ${veiculo || 'esse veiculo'} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve?`,
+        novoEstado: 'CONSULTANDO_ESTOQUE',
+        acoes: ['SIMILAR_ENCONTRADO'],
         handoff: { necessario: false },
       };
     }
-
-    // 8. Tudo coletado — resumo final
-    const resumo = `✅ *Pedido pronto para confirmar!*\n\n` +
-      `🔧 Peça: ${produto.nome}\n` +
-      `💰 Valor: ${preco}\n` +
-      `🚚 Entrega: ${entrega}\n` +
-      `💳 Pagamento: ${pagamento}\n\n` +
-      `Confirma o pedido?`;
 
     return {
-      resposta: resumo,
-      novoEstado: 'AGUARDANDO_PAGAMENTO',
-      acoes: ['PEDIDO_PRONTO', 'AGUARDAR_CONFIRMACAO'],
-      handoff: { necessario: false },
+      resposta: `Nao temos *${peca}* em estoque agora. Vou acionar um especialista para verificar com nossos fornecedores!`,
+      novoEstado: 'AGUARDANDO_VENDEDOR',
+      acoes: ['PECA_NAO_ENCONTRADA'],
+      handoff: {
+        necessario: true,
+        motivo: `Peca nao encontrada: ${peca} para ${veiculo || 'veiculo nao informado'}`,
+        prioridade: 'MEDIA',
+      },
     };
   }
 }
