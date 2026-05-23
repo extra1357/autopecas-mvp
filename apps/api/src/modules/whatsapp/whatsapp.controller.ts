@@ -1,44 +1,56 @@
-import { Controller, Get, Post, Body, Query, Res, Logger } from '@nestjs/common';
-import { Response } from 'express';
+﻿import { Controller, Get, Post, Body, Query, Logger } from '@nestjs/common';
+import { ConversasService } from '../conversations/conversas.service';
 import { WhatsappService } from './whatsapp.service';
 
 @Controller('whatsapp')
 export class WhatsappController {
   private readonly logger = new Logger(WhatsappController.name);
+  private readonly verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'autopecas_webhook_2026';
 
-  constructor(private readonly whatsappService: WhatsappService) {}
+  constructor(
+    private readonly conversasService: ConversasService,
+    private readonly whatsappService: WhatsappService,
+  ) {}
 
-  // Verificação do webhook pela Meta
   @Get('webhook')
-  verificar(
+  verificarWebhook(
     @Query('hub.mode') mode: string,
     @Query('hub.verify_token') token: string,
     @Query('hub.challenge') challenge: string,
-    @Res() res: Response,
   ) {
-    this.logger.log(`Verificação webhook — mode: ${mode}, token: ${token}`);
-    const result = this.whatsappService.verificarWebhook(mode, token, challenge);
-
-    if (result) {
-      this.logger.log('✅ Webhook verificado com sucesso!');
-      return res.status(200).send(result);
+    this.logger.log(`Webhook verificado: mode=${mode} token=${token}`);
+    if (mode === 'subscribe' && token === this.verifyToken) {
+      this.logger.log('Webhook aprovado!');
+      return parseInt(challenge);
     }
-
-    this.logger.warn('❌ Falha na verificação do webhook');
-    return res.status(403).send('Forbidden');
+    return 'Token invalido';
   }
 
-  // Recebe mensagens do WhatsApp
   @Post('webhook')
-  async receber(@Body() body: any, @Res() res: Response) {
-    // Responde 200 imediatamente para a Meta não reenviar
-    res.status(200).send('OK');
-
+  async receberMensagem(@Body() body: any) {
     try {
-      this.logger.log('📨 Webhook recebido');
-      await this.whatsappService.processarWebhook(body);
-    } catch (err) {
-      this.logger.error(`Erro ao processar webhook: ${err.message}`);
+      const entry = body?.entry?.[0];
+      const changes = entry?.changes?.[0];
+      const value = changes?.value;
+      const messages = value?.messages;
+
+      if (!messages || messages.length === 0) return { status: 'ok' };
+
+      const msg = messages[0];
+      const telefone = msg.from;
+      const texto = msg.text?.body;
+
+      if (!texto) return { status: 'ok' };
+
+      this.logger.log(`Mensagem recebida de ${telefone}: ${texto}`);
+
+      const resposta = await this.conversasService.processarMensagem(telefone, texto);
+      await this.whatsappService.enviarMensagem(telefone, resposta);
+
+      return { status: 'ok' };
+    } catch (error) {
+      this.logger.error(`Erro no webhook: ${error.message}`);
+      return { status: 'error' };
     }
   }
 }
