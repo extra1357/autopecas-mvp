@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+﻿import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bull';
 import { PrismaModule } from './modules/prisma/prisma.module';
@@ -7,6 +7,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { HandoffModule } from './modules/handoff/handoff.module';
 import { WorkflowsModule } from './modules/workflows/workflows.module';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -24,5 +25,6 @@ import { WorkflowsModule } from './modules/workflows/workflows.module';
     WorkflowsModule,
     WhatsappModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

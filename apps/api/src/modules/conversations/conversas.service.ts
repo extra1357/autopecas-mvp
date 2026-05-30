@@ -4,122 +4,161 @@ import { AiService } from '../ai/ai.service';
 import { WorkflowEngine } from '../workflows/workflow.engine';
 import { HandoffService } from '../handoff/handoff.service';
 
-const INTENTS_WORKFLOW = ['buscar_peca', 'consultar_preco', 'consultar_estoque', 'entrega', 'retirada', 'status_pedido'];
-const INTENTS_DIRETAS = ['saudacao', 'outro'];
-
 @Injectable()
 export class ConversasService {
   private readonly logger = new Logger(ConversasService.name);
 
   constructor(
     private prisma: PrismaService,
-    private ai: AiService,
+    private aiService: AiService,
     private workflowEngine: WorkflowEngine,
     private handoffService: HandoffService,
   ) {}
 
-  async processarMensagem(telefone: string, mensagem: string): Promise<string> {
-    const cliente = await this.prisma.cliente.upsert({
-      where: { telefone },
-      update: {},
-      create: { telefone },
-    });
-
+  async buscarOuCriarConversa(telefone: string) {
+    let cliente = await this.prisma.cliente.findUnique({ where: { telefone } });
+    if (!cliente) {
+      cliente = await this.prisma.cliente.create({ data: { telefone } });
+    }
     let conversa = await this.prisma.conversa.findFirst({
-      where: { clienteId: cliente.id, status: { in: ['ATIVA', 'AGUARDANDO_HUMANO'] } },
+      where: { clienteId: cliente.id, status: { not: 'FINALIZADA' } },
+      orderBy: { createdAt: 'desc' },
       include: { mensagens: { orderBy: { timestamp: 'desc' }, take: 5 } },
     });
-
     if (!conversa) {
       conversa = await this.prisma.conversa.create({
-        data: { clienteId: cliente.id, contexto: {} },
-        include: { mensagens: { orderBy: { timestamp: 'desc' }, take: 5 } },
+        data: { clienteId: cliente.id },
+        include: { mensagens: true },
       });
-      this.logger.log(`Nova conversa: ${conversa.id} para ${telefone}`);
+    }
+    return conversa;
+  }
+
+  async processarMensagem(telefone: string, mensagem: string): Promise<string> {
+    this.logger.log(`Processando mensagem de ${telefone}: "${mensagem}"`);
+
+    let cliente = await this.prisma.cliente.findUnique({ where: { telefone } });
+    if (!cliente) {
+      cliente = await this.prisma.cliente.create({ data: { telefone } });
+    }
+
+    let conversa = await this.prisma.conversa.findFirst({
+      where: { clienteId: cliente.id, status: { not: 'FINALIZADA' } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!conversa) {
+      conversa = await this.prisma.conversa.create({
+        data: { clienteId: cliente.id },
+      });
     }
 
     await this.prisma.mensagem.create({
       data: { conversaId: conversa.id, origem: 'CLIENTE', conteudo: mensagem },
     });
 
-    const historico = conversa.mensagens.reverse().map(m => `${m.origem}: ${m.conteudo}`);
-    const intentResult = await this.ai.processarMensagem(mensagem, historico);
-    this.logger.log(`Intent: ${intentResult.intent} | Confianca: ${intentResult.confianca}`);
+    if (conversa.status === 'AGUARDANDO_HUMANO' || conversa.status === 'EM_ATENDIMENTO') {
+      return 'Um vendedor ja esta sendo notificado. Aguarde!';
+    }
 
-    let resposta: string;
+    const historico = await this.buscarHistoricoTexto(conversa.id);
+    const intencao = await this.aiService.classificarIntencao(mensagem, historico);
+    this.logger.log(`Intent: ${intencao.intent} | Confianca: ${intencao.confianca} | Estado: ${conversa.estadoAtual}`);
 
-    if (intentResult.intent === 'falar_vendedor') {
-      resposta = 'Claro! Vou chamar um atendente agora. Aguarde um momento!';
-      await this.prisma.mensagem.create({
-        data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
-      });
+    if (intencao.intent === 'falar_vendedor') {
       await this.handoffService.criarHandoff({
         conversaId: conversa.id,
         clienteId: cliente.id,
         telefone,
-        resumo: `Cliente solicitou atendente. Contexto: ${mensagem}`,
-        prioridade: 'MEDIA',
-        slaMinutos: 15,
-        ...intentResult.entidades,
+        resumo: `Cliente solicitou vendedor. Historico: ${historico}`,
+        prioridade: 'ALTA',
+        slaMinutos: 10,
       });
-      return resposta;
+      await this.prisma.conversa.update({
+        where: { id: conversa.id },
+        data: { status: 'AGUARDANDO_HUMANO', estadoAtual: 'AGUARDANDO_VENDEDOR' },
+      });
+      return 'Vou chamar um vendedor. Em ate 10 minutos alguem entrara em contato!';
     }
 
-    if (INTENTS_DIRETAS.includes(intentResult.intent)) {
-      resposta = intentResult.resposta || 'Como posso ajudar?';
-      await this.prisma.mensagem.create({
-        data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
-      });
-      return resposta;
+    if (intencao.intent === 'saudacao') {
+      return 'Ola! Bem-vindo a nossa loja de autopecas!\n\nQual peca voce esta procurando? Me informe tambem o modelo e ano do veiculo.';
     }
 
-    if (INTENTS_WORKFLOW.includes(intentResult.intent)) {
-      const ctx = conversa.contexto as Record<string, any>;
-      const workflowResult = await this.workflowEngine.executar({
-        conversaId: conversa.id,
-        clienteId: cliente.id,
-        telefone,
-        intent: intentResult.intent,
-        entidades: intentResult.entidades,
-        estadoAtual: conversa.estadoAtual,
-        contexto: ctx,
+    if (intencao.intent === 'desconhecido' || intencao.confianca < 0.6) {
+      const mensagensCount = await this.prisma.mensagem.count({
+        where: { conversaId: conversa.id, origem: 'CLIENTE' },
       });
-
-      await this.prisma.mensagem.create({
-        data: { conversaId: conversa.id, origem: 'IA', conteudo: workflowResult.resposta },
-      });
-
-      if (workflowResult.handoff?.necessario) {
+      if (mensagensCount >= 3) {
         await this.handoffService.criarHandoff({
           conversaId: conversa.id,
           clienteId: cliente.id,
           telefone,
-          resumo: workflowResult.handoff.motivo || 'Handoff automatico',
-          prioridade: workflowResult.handoff.prioridade || 'MEDIA',
-          slaMinutos: 30,
-          ...intentResult.entidades,
+          resumo: `Multiplas mensagens sem resolucao. Ultima: "${mensagem}"`,
+          prioridade: 'ALTA',
+          slaMinutos: 15,
         });
+        await this.prisma.conversa.update({
+          where: { id: conversa.id },
+          data: { status: 'AGUARDANDO_HUMANO', estadoAtual: 'AGUARDANDO_VENDEDOR' },
+        });
+        return 'Nao consegui entender. Vou chamar um vendedor para te ajudar!';
       }
-
-      return workflowResult.resposta;
+      return 'Desculpe, nao entendi. Pode me dizer qual peca precisa e para qual veiculo?';
     }
 
-    resposta = intentResult.resposta || 'Pode me dar mais detalhes?';
+    const ctx = {
+      conversaId: conversa.id,
+      clienteId: cliente.id,
+      telefone,
+      intent: intencao.intent,
+      entidades: {
+        peca: intencao.entidades.peca ?? undefined,
+        veiculo: intencao.entidades.veiculo ?? undefined,
+        ano: intencao.entidades.ano ?? undefined,
+        pagamento: intencao.entidades.pagamento ?? undefined,
+        entrega: intencao.entidades.tipo_atendimento ?? undefined,
+      },
+      estadoAtual: conversa.estadoAtual,
+      contexto: conversa.contexto as Record<string, any>,
+    };
+
+    const resultado = await this.workflowEngine.executar(ctx);
+
     await this.prisma.mensagem.create({
-      data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
+      data: { conversaId: conversa.id, origem: 'IA', conteudo: resultado.resposta },
     });
-    return resposta;
+
+    if (resultado.handoff?.necessario) {
+      await this.handoffService.criarHandoff({
+        conversaId: conversa.id,
+        clienteId: cliente.id,
+        telefone,
+        resumo: resultado.handoff.motivo ?? 'Handoff solicitado pelo workflow',
+        peca: ctx.entidades.peca,
+        veiculo: ctx.entidades.veiculo,
+        pagamento: ctx.entidades.pagamento,
+        entrega: ctx.entidades.entrega,
+        prioridade: resultado.handoff.prioridade ?? 'MEDIA',
+        slaMinutos: 30,
+      });
+      await this.prisma.conversa.update({
+        where: { id: conversa.id },
+        data: { status: 'AGUARDANDO_HUMANO' },
+      });
+    }
+
+    return resultado.resposta;
   }
 
-  async buscarOuCriarConversa(telefone: string) {
-    const cliente = await this.prisma.cliente.upsert({
-      where: { telefone },
-      update: {},
-      create: { telefone },
+  private async buscarHistoricoTexto(conversaId: string): Promise<string> {
+    const mensagens = await this.prisma.mensagem.findMany({
+      where: { conversaId },
+      orderBy: { timestamp: 'desc' },
+      take: 6,
     });
-    return this.prisma.conversa.findFirst({
-      where: { clienteId: cliente.id, status: { in: ['ATIVA', 'AGUARDANDO_HUMANO'] } },
-      include: { mensagens: { orderBy: { timestamp: 'asc' } }, cliente: true },
-    });
+    return mensagens
+      .reverse()
+      .map(m => `${m.origem === 'CLIENTE' ? 'Cliente' : 'Bot'}: ${m.conteudo}`)
+      .join('\n');
   }
 }
