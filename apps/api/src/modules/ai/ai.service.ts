@@ -29,24 +29,26 @@ Analise a mensagem e retorne APENAS um JSON valido, sem texto adicional.
 
 Intents possiveis:
 - buscar_peca: cliente quer comprar ou verificar disponibilidade de peca
-- querer_mais_itens: cliente quer adicionar mais pecas. Exemplos: "sim", "quero mais", "tenho outra peca", "adicionar", "mais uma", "procurar outro item"
-- finalizar_itens: cliente nao quer mais pecas. Exemplos: "nao", "so isso", "e tudo", "apenas isso", "nao obrigado", "pode finalizar", "somente isso", "e so", "nada mais"
-- escolher_retirada: cliente quer retirar na loja. Exemplos: "retirada", "vou buscar", "pegar na loja", "retirar", "busco ai"
-- escolher_entrega: cliente quer receber em casa. Exemplos: "delivery", "entrega", "entregar", "para entregar", "quero delivery", "manda pra mim", "me manda", "quero receber"
-- informar_endereco: cliente fornece endereco de entrega
+- querer_mais_itens: cliente quer adicionar mais pecas. Exemplos: "sim", "quero mais", "tenho outra peca", "adicionar", "mais uma"
+- finalizar_itens: cliente nao quer mais pecas. Exemplos: "nao", "so isso", "e tudo", "nao obrigado", "pode finalizar", "somente isso"
+- escolher_retirada: cliente quer retirar na loja. Exemplos: "retirada", "vou buscar", "pegar na loja", "retirar", "loja", "busco ai", "retiro"
+- escolher_entrega: cliente quer receber em casa. Exemplos: "delivery", "entrega", "entregar", "para entregar", "quero delivery", "receber", "receber em casa", "me manda"
+- informar_endereco: cliente fornece um endereco. QUALQUER mensagem que contenha rua, avenida, numero, bairro, cidade ou CEP deve ser classificada como informar_endereco. Exemplos: "Rua das Flores 123", "Av Paulista 1000 Bela Vista", "Rua Maranhao 255 Salto"
 - informar_pagamento: cliente informa forma de pagamento. Exemplos: "pix", "cartao", "dinheiro", "credito", "debito"
 - confirmar_pedido: cliente confirma o pedido. Exemplos: "sim", "confirmo", "esta correto", "pode ser", "tudo certo", "ok"
-- corrigir_pedido: cliente quer alterar algo no pedido. Exemplos: "nao", "quero mudar", "esta errado", "corrigir", "alterar"
+- corrigir_pedido: cliente quer alterar algo. Exemplos: "nao", "quero mudar", "esta errado", "corrigir"
+- encerrar_conversa: cliente se despede ou agradece apos pedido. Exemplos: "obrigado", "tchau", "ate mais", "valeu", "ok obrigado"
 - falar_vendedor: cliente quer falar com humano
 - saudacao: oi, ola, bom dia, boa tarde, boa noite
 - desconhecido: nao se encaixa em nenhuma categoria
 
-ATENCAO: Use o historico para entender o contexto.
-- Se o bot perguntou "Posso ajudar com mais alguma peca?" e o cliente respondeu "sim" → querer_mais_itens
-- Se o bot perguntou "Posso ajudar com mais alguma peca?" e o cliente respondeu "nao" → finalizar_itens
-- Se o bot perguntou "Esta tudo correto?" e o cliente respondeu "sim" → confirmar_pedido
-- Se o bot perguntou "Esta tudo correto?" e o cliente respondeu "nao" → corrigir_pedido
-- Se o bot perguntou "delivery ou retirada" e o cliente respondeu com qualquer variacao → escolher_entrega ou escolher_retirada
+REGRAS CRITICAS:
+1. Se a mensagem contem qualquer tipo de logradouro (Rua, Av, Avenida, R., Al.) ou parece ser um endereco → informar_endereco. Extraia o endereco completo no campo endereco.
+2. Use o historico para entender o contexto atual da conversa.
+3. Se o bot perguntou "informe o endereco" e o cliente respondeu com qualquer texto que pareca endereco → informar_endereco.
+4. Se o bot perguntou "delivery ou retirada" → escolher_entrega ou escolher_retirada.
+5. Se o bot perguntou "mais alguma peca?" → querer_mais_itens ou finalizar_itens.
+6. Se o bot perguntou "esta tudo correto?" → confirmar_pedido ou corrigir_pedido.
 
 Historico recente:
 ${historico || 'nenhum'}

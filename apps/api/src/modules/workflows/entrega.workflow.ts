@@ -15,6 +15,7 @@ export class EntregaWorkflow implements OnModuleInit {
     'querer_mais_itens',
     'finalizar_itens',
     'corrigir_pedido',
+    'encerrar_conversa',
   ];
 
   constructor(private engine: WorkflowEngine) {}
@@ -23,20 +24,38 @@ export class EntregaWorkflow implements OnModuleInit {
     this.engine.registrar(this);
   }
 
-  private gerarResumo(ctx: WorkflowContext): string {
-    const carrinho: any[] = ctx.contexto.carrinho || [];
-    const itens = carrinho.map((item, i) => `  ${i + 1}. ${item.nome} (${item.marca}) - R$ ${Number(item.preco).toFixed(2)}`).join('\n');
+  private gerarResumo(contexto: Record<string, any>): string {
+    const carrinho: any[] = contexto.carrinho || [];
+    const itens = carrinho.length > 0
+      ? carrinho.map((item, i) => `  ${i + 1}. ${item.nome} (${item.marca}) - R$ ${Number(item.preco).toFixed(2)}`).join('\n')
+      : '  Nenhum item encontrado';
     const total = carrinho.reduce((sum, item) => sum + Number(item.preco) * (item.quantidade || 1), 0);
-    const modalidade = ctx.contexto.tipoEntrega === 'delivery' ? 'Entrega' : 'Retirada na loja';
-    const endereco = ctx.contexto.tipoEntrega === 'delivery' ? `\n• Endereco: ${ctx.contexto.endereco || 'nao informado'}` : '';
-    const pagamento = ctx.contexto.pagamento || 'nao informado';
+    const modalidade = contexto.tipoEntrega === 'delivery' ? 'Entrega' : 'Retirada na loja';
+    const endereco = contexto.tipoEntrega === 'delivery' ? `\n• Endereco: ${contexto.endereco || 'nao informado'}` : '';
+    const pagamento = contexto.pagamento || 'nao informado';
 
     return `📋 *RESUMO DO PEDIDO*\n\n• Produtos:\n${itens}\n• Total: *R$ ${total.toFixed(2)}*\n• Modalidade: ${modalidade}${endereco}\n• Pagamento: ${pagamento}\n\nEsta tudo correto?`;
   }
 
   async executar(ctx: WorkflowContext, prisma: PrismaService): Promise<WorkflowResult> {
-    const { intent, entidades, contexto } = ctx;
-    const carrinho: any[] = contexto.carrinho || [];
+    const { intent, entidades } = ctx;
+
+    // Busca contexto atualizado direto do banco
+    const conversaAtual = await prisma.conversa.findUnique({
+      where: { id: ctx.conversaId },
+      select: { contexto: true },
+    });
+    const contexto = (conversaAtual?.contexto as Record<string, any>) || ctx.contexto;
+
+    // Encerrar conversa
+    if (intent === 'encerrar_conversa') {
+      return {
+        resposta: 'De nada! Foi um prazer atender voce. Qualquer duvida estamos aqui. Ate logo! 👋',
+        novoEstado: 'FINALIZADA',
+        acoes: ['CONVERSA_ENCERRADA'],
+        handoff: { necessario: false },
+      };
+    }
 
     // Cliente quer mais itens
     if (intent === 'querer_mais_itens') {
@@ -48,7 +67,7 @@ export class EntregaWorkflow implements OnModuleInit {
       };
     }
 
-    // Cliente finalizou itens — pergunta entrega ou retirada
+    // Cliente finalizou itens
     if (intent === 'finalizar_itens') {
       return {
         resposta: 'Perfeito! Voce prefere retirar na loja ou receber por entrega?',
@@ -87,27 +106,30 @@ export class EntregaWorkflow implements OnModuleInit {
     }
 
     // Cliente informou endereco
-    if (intent === 'informar_endereco' && entidades.endereco) {
+    if (intent === 'informar_endereco') {
+      const endereco = entidades.endereco || ctx.entidades.endereco || 'nao informado';
+      const novoContexto = { ...contexto, endereco, tipoEntrega: 'delivery' };
       await prisma.conversa.update({
         where: { id: ctx.conversaId },
-        data: { contexto: { ...contexto, endereco: entidades.endereco } },
+        data: { contexto: novoContexto },
       });
       return {
-        resposta: 'Endereco anotado! Qual sera a forma de pagamento?\n(Pix, Cartao de Credito, Cartao de Debito ou Dinheiro)',
+        resposta: `Endereco anotado! ✅\n\nQual sera a forma de pagamento?\n(Pix, Cartao de Credito, Cartao de Debito ou Dinheiro)`,
         novoEstado: 'AGUARDANDO_PAGAMENTO',
         acoes: ['ENDERECO_INFORMADO'],
         handoff: { necessario: false },
       };
     }
 
-    // Cliente informou pagamento — mostra resumo
-    if (intent === 'informar_pagamento' && entidades.pagamento) {
-      const novoContexto = { ...contexto, pagamento: entidades.pagamento };
+    // Cliente informou pagamento
+    if (intent === 'informar_pagamento') {
+      const pagamento = entidades.pagamento || 'nao informado';
+      const novoContexto = { ...contexto, pagamento };
       await prisma.conversa.update({
         where: { id: ctx.conversaId },
         data: { contexto: novoContexto },
       });
-      const resumo = this.gerarResumo({ ...ctx, contexto: novoContexto });
+      const resumo = this.gerarResumo(novoContexto);
       return {
         resposta: resumo,
         novoEstado: 'AGUARDANDO_CONFIRMACAO_KIT',
@@ -116,8 +138,9 @@ export class EntregaWorkflow implements OnModuleInit {
       };
     }
 
-    // Cliente confirmou pedido — chama vendedor
+    // Cliente confirmou pedido
     if (intent === 'confirmar_pedido') {
+      const carrinho: any[] = contexto.carrinho || [];
       const itens = carrinho.map(i => `${i.nome} (${i.marca}) - R$ ${Number(i.preco).toFixed(2)}`).join(', ');
       const total = carrinho.reduce((sum, i) => sum + Number(i.preco), 0);
       return {
@@ -132,10 +155,10 @@ export class EntregaWorkflow implements OnModuleInit {
       };
     }
 
-    // Cliente quer corrigir algo
+    // Cliente quer corrigir
     if (intent === 'corrigir_pedido') {
       return {
-        resposta: 'Claro! O que voce gostaria de corrigir? (produto, endereco, forma de pagamento ou modalidade de entrega)',
+        resposta: 'Claro! O que voce gostaria de corrigir?\n(produto, endereco, forma de pagamento ou modalidade de entrega)',
         novoEstado: ctx.estadoAtual,
         acoes: ['CORRECAO_SOLICITADA'],
         handoff: { necessario: false },
