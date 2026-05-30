@@ -20,7 +20,14 @@ export class BuscarPecaWorkflow implements OnModuleInit {
 
   async executar(ctx: WorkflowContext, prisma: PrismaService): Promise<WorkflowResult> {
     const { peca, veiculo, ano } = ctx.entidades;
-    const carrinho: any[] = ctx.contexto.carrinho || [];
+
+    // Busca contexto atualizado do banco
+    const conversaAtual = await prisma.conversa.findUnique({
+      where: { id: ctx.conversaId },
+      select: { contexto: true },
+    });
+    const contexto = (conversaAtual?.contexto as Record<string, any>) || ctx.contexto;
+    const carrinho: any[] = contexto.carrinho || [];
 
     if (!peca) {
       return {
@@ -38,7 +45,6 @@ export class BuscarPecaWorkflow implements OnModuleInit {
       const p = produtos[0];
       const outros = produtos.length > 1 ? ` Tambem temos mais ${produtos.length - 1} opcao(oes).` : '';
 
-      // Adiciona ao carrinho
       carrinho.push({
         id: p.id,
         nome: p.nome,
@@ -50,7 +56,7 @@ export class BuscarPecaWorkflow implements OnModuleInit {
 
       await prisma.conversa.update({
         where: { id: ctx.conversaId },
-        data: { contexto: { ...ctx.contexto, carrinho, veiculo, ano } },
+        data: { contexto: { ...contexto, carrinho, veiculo, ano } },
       });
 
       return {
@@ -65,22 +71,18 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     if (similares.length > 0) {
       const nomes = similares.map(s => `- ${s.nome} para ${s.aplicacao} | R$ ${s.preco.toFixed(2)}`).join('\n');
       return {
-        resposta: `Nao encontrei *${peca}* para ${veiculo || 'esse veiculo'} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve?`,
-        novoEstado: 'CONSULTANDO_ESTOQUE',
+        resposta: `Nao encontrei *${peca}* para ${veiculo || 'esse veiculo'} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve? Ou posso buscar outra peca para voce.`,
+        novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['SIMILAR_ENCONTRADO'],
         handoff: { necessario: false },
       };
     }
 
     return {
-      resposta: `Nao temos *${peca}* em estoque agora. Vou acionar um especialista para verificar com nossos fornecedores!`,
-      novoEstado: 'AGUARDANDO_VENDEDOR',
+      resposta: `Nao encontrei *${peca}* no nosso estoque no momento.\n\nPosso buscar outra peca para voce, ou se preferir, podemos finalizar o pedido com os itens ja selecionados.`,
+      novoEstado: 'AGUARDANDO_MAIS_ITENS',
       acoes: ['PECA_NAO_ENCONTRADA'],
-      handoff: {
-        necessario: true,
-        motivo: `Peca nao encontrada: ${peca} para ${veiculo || 'veiculo nao informado'}`,
-        prioridade: 'MEDIA',
-      },
+      handoff: { necessario: false },
     };
   }
 }
