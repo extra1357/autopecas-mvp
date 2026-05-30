@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface WorkflowContext {
@@ -13,6 +13,7 @@ export interface WorkflowContext {
     marca?: string;
     pagamento?: string;
     entrega?: string;
+    endereco?: string;
   };
   estadoAtual: string;
   contexto: Record<string, any>;
@@ -45,7 +46,7 @@ export class WorkflowEngine {
   registrar(workflow: Workflow) {
     for (const intent of workflow.intents) {
       this.workflows.set(intent, workflow);
-      this.logger.log(`Workflow registrado: ${workflow.nome} → intent: ${intent}`);
+      this.logger.log(`Workflow registrado: ${workflow.nome} â†’ intent: ${intent}`);
     }
   }
 
@@ -55,7 +56,7 @@ export class WorkflowEngine {
     if (!workflow) {
       this.logger.warn(`Nenhum workflow para intent: ${ctx.intent}`);
       return {
-        resposta: 'Entendi! Pode me dar mais detalhes sobre o que você precisa?',
+        resposta: 'Entendi! Pode me dar mais detalhes sobre o que vocÃª precisa?',
         novoEstado: ctx.estadoAtual,
         acoes: [],
         handoff: { necessario: false },
@@ -81,7 +82,7 @@ export class WorkflowEngine {
         },
       });
 
-      // Loga a transição
+      // Loga a transiÃ§Ã£o
       await this.prisma.logConversa.create({
         data: {
           conversaId: ctx.conversaId,
