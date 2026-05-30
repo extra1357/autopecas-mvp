@@ -46,7 +46,7 @@ export class WorkflowEngine {
   registrar(workflow: Workflow) {
     for (const intent of workflow.intents) {
       this.workflows.set(intent, workflow);
-      this.logger.log(`Workflow registrado: ${workflow.nome} â†’ intent: ${intent}`);
+      this.logger.log(`Workflow registrado: ${workflow.nome} → intent: ${intent}`);
     }
   }
 
@@ -56,7 +56,7 @@ export class WorkflowEngine {
     if (!workflow) {
       this.logger.warn(`Nenhum workflow para intent: ${ctx.intent}`);
       return {
-        resposta: 'Entendi! Pode me dar mais detalhes sobre o que vocÃª precisa?',
+        resposta: 'Entendi! Pode me dar mais detalhes sobre o que voce precisa?',
         novoEstado: ctx.estadoAtual,
         acoes: [],
         handoff: { necessario: false },
@@ -68,21 +68,25 @@ export class WorkflowEngine {
     try {
       const result = await workflow.executar(ctx, this.prisma);
 
-      // Persiste novo estado na conversa
+      // Busca contexto atual do banco para nao sobrescrever carrinho
+      const conversaAtual = await this.prisma.conversa.findUnique({
+        where: { id: ctx.conversaId },
+        select: { contexto: true },
+      });
+      const contextoAtual = (conversaAtual?.contexto as Record<string, any>) || ctx.contexto;
+
       await this.prisma.conversa.update({
         where: { id: ctx.conversaId },
         data: {
           estadoAtual: result.novoEstado as any,
           contexto: {
-            ...ctx.contexto,
-            ...ctx.entidades,
+            ...contextoAtual,
             intent: ctx.intent,
             ultimaAcao: result.acoes[result.acoes.length - 1],
           },
         },
       });
 
-      // Loga a transiÃ§Ã£o
       await this.prisma.logConversa.create({
         data: {
           conversaId: ctx.conversaId,
@@ -93,7 +97,6 @@ export class WorkflowEngine {
             estadoAnterior: ctx.estadoAtual,
             novoEstado: result.novoEstado,
             acoes: result.acoes,
-            handoff: result.handoff,
           },
         },
       });
@@ -101,20 +104,11 @@ export class WorkflowEngine {
       return result;
     } catch (err) {
       this.logger.error(`Erro no workflow ${workflow.nome}: ${err.message}`);
-
-      await this.prisma.logConversa.create({
-        data: {
-          conversaId: ctx.conversaId,
-          tipo: 'WORKFLOW_ERRO',
-          payload: { workflow: workflow.nome, erro: err.message },
-        },
-      });
-
       return {
-        resposta: 'Tive um problema interno. Um atendente vai te ajudar em breve.',
+        resposta: 'Tive um problema interno. Um vendedor vai te ajudar em breve.',
         novoEstado: 'AGUARDANDO_VENDEDOR',
         acoes: ['ERRO_INTERNO'],
-        handoff: { necessario: true, motivo: `Erro no workflow: ${err.message}`, prioridade: 'ALTA' },
+        handoff: { necessario: true, motivo: `Erro: ${err.message}`, prioridade: 'ALTA' },
       };
     }
   }
