@@ -20,6 +20,7 @@ export class BuscarPecaWorkflow implements OnModuleInit {
 
   async executar(ctx: WorkflowContext, prisma: PrismaService): Promise<WorkflowResult> {
     const { peca, veiculo, ano } = ctx.entidades;
+    const carrinho: any[] = ctx.contexto.carrinho || [];
 
     if (!peca) {
       return {
@@ -35,19 +36,32 @@ export class BuscarPecaWorkflow implements OnModuleInit {
 
     if (produtos.length > 0) {
       const p = produtos[0];
-      const disponibilidade = p.estoque > 0 ? `${p.estoque} em estoque` : 'ultimo disponivel';
       const outros = produtos.length > 1 ? ` Tambem temos mais ${produtos.length - 1} opcao(oes).` : '';
 
+      // Adiciona ao carrinho
+      carrinho.push({
+        id: p.id,
+        nome: p.nome,
+        marca: p.marca,
+        aplicacao: p.aplicacao,
+        preco: p.preco,
+        quantidade: 1,
+      });
+
+      await prisma.conversa.update({
+        where: { id: ctx.conversaId },
+        data: { contexto: { ...ctx.contexto, carrinho, veiculo, ano } },
+      });
+
       return {
-        resposta: `Encontrei! *${p.nome}* (${p.marca}) para ${p.aplicacao}.\nPreco: *R$ ${p.preco.toFixed(2)}* | ${disponibilidade}.${outros}\n\nQuer delivery ou retirada na loja?`,
-        novoEstado: 'AGUARDANDO_ENDERECO',
+        resposta: `Encontrei! *${p.nome}* (${p.marca}) para ${p.aplicacao}.\nPreco: *R$ ${p.preco.toFixed(2)}* | ${p.estoque} em estoque.${outros}\n\n✅ Item adicionado!\n\nPosso ajudar com mais alguma peca ou acessorio?`,
+        novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['PECA_ENCONTRADA'],
         handoff: { necessario: false },
       };
     }
 
     const similares = await this.inventory.buscarSimilares(peca);
-
     if (similares.length > 0) {
       const nomes = similares.map(s => `- ${s.nome} para ${s.aplicacao} | R$ ${s.preco.toFixed(2)}`).join('\n');
       return {
