@@ -56,7 +56,20 @@ export class ConversasService {
       data: { conversaId: conversa.id, origem: 'CLIENTE', conteudo: mensagem },
     });
 
+    // Guard: vendedor assumiu — so bloqueia se NAO for encerramento
     if (conversa.status === 'AGUARDANDO_HUMANO' || conversa.status === 'EM_ATENDIMENTO') {
+      const historico = await this.buscarHistoricoTexto(conversa.id);
+      const intencao = await this.aiService.classificarIntencao(mensagem, historico);
+      if (intencao.intent === 'encerrar_conversa') {
+        await this.prisma.conversa.update({
+          where: { id: conversa.id },
+          data: { status: 'FINALIZADA', estadoAtual: 'FINALIZADA' },
+        });
+        await this.prisma.mensagem.create({
+          data: { conversaId: conversa.id, origem: 'IA', conteudo: 'De nada! Foi um prazer atender voce. Qualquer duvida estamos aqui. Ate logo! 👋' },
+        });
+        return 'De nada! Foi um prazer atender voce. Qualquer duvida estamos aqui. Ate logo! 👋';
+      }
       return 'Um vendedor ja esta sendo notificado. Aguarde!';
     }
 
@@ -117,6 +130,7 @@ export class ConversasService {
         ano: intencao.entidades.ano ?? undefined,
         pagamento: intencao.entidades.pagamento ?? undefined,
         entrega: intencao.entidades.tipo_atendimento ?? undefined,
+        endereco: intencao.entidades.endereco ?? undefined,
       },
       estadoAtual: conversa.estadoAtual,
       contexto: conversa.contexto as Record<string, any>,
@@ -127,6 +141,14 @@ export class ConversasService {
     await this.prisma.mensagem.create({
       data: { conversaId: conversa.id, origem: 'IA', conteudo: resultado.resposta },
     });
+
+    if (resultado.novoEstado === 'FINALIZADA') {
+      await this.prisma.conversa.update({
+        where: { id: conversa.id },
+        data: { status: 'FINALIZADA', estadoAtual: 'FINALIZADA' },
+      });
+      return resultado.resposta;
+    }
 
     if (resultado.handoff?.necessario) {
       await this.handoffService.criarHandoff({
