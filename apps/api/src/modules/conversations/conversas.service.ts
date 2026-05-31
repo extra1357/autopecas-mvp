@@ -56,7 +56,6 @@ export class ConversasService {
       data: { conversaId: conversa.id, origem: 'CLIENTE', conteudo: mensagem },
     });
 
-    // Guard: vendedor assumiu — so bloqueia se NAO for encerramento
     if (conversa.status === 'AGUARDANDO_HUMANO' || conversa.status === 'EM_ATENDIMENTO') {
       const historico = await this.buscarHistoricoTexto(conversa.id);
       const intencao = await this.aiService.classificarIntencao(mensagem, historico);
@@ -151,15 +150,23 @@ export class ConversasService {
     }
 
     if (resultado.handoff?.necessario) {
+      const conversaAtualizada = await this.prisma.conversa.findUnique({
+        where: { id: conversa.id },
+        select: { contexto: true },
+      });
+      const ctxAtualizado = (conversaAtualizada?.contexto as Record<string, any>) || {};
+      const carrinho: any[] = ctxAtualizado.carrinho || [];
+      const pecasDoCarrinho = carrinho.map(i => i.nome).join(', ');
+
       await this.handoffService.criarHandoff({
         conversaId: conversa.id,
         clienteId: cliente.id,
         telefone,
         resumo: resultado.handoff.motivo ?? 'Handoff solicitado pelo workflow',
-        peca: ctx.entidades.peca,
-        veiculo: ctx.entidades.veiculo,
-        pagamento: ctx.entidades.pagamento,
-        entrega: ctx.entidades.entrega,
+        peca: pecasDoCarrinho || ctx.entidades.peca,
+        veiculo: ctxAtualizado.veiculo || ctx.entidades.veiculo,
+        pagamento: ctxAtualizado.pagamento || ctx.entidades.pagamento,
+        entrega: ctxAtualizado.tipoEntrega || ctx.entidades.entrega,
         prioridade: resultado.handoff.prioridade ?? 'MEDIA',
         slaMinutos: 30,
       });

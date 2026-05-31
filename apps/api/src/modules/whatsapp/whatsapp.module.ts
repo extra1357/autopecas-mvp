@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappController } from './whatsapp.controller';
 import { WhatsappTestController } from './whatsapp-test.controller';
@@ -7,7 +7,7 @@ import { ConversasModule } from '../conversations/conversas.module';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
-  imports: [ConversasModule, PrismaModule],
+  imports: [forwardRef(() => ConversasModule), PrismaModule],
   controllers: [WhatsappController, WhatsappTestController],
   providers: [WhatsappService, InatividadeService],
   exports: [WhatsappService],
