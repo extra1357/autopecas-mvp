@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Query, Res, Logger } from '@nestjs/common';
+﻿content = open('src/modules/whatsapp/whatsapp.controller.ts').read()
+new_content = '''import { Controller, Get, Post, Body, Query, Res, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { ConversasService } from '../conversations/conversas.service';
 import { WhatsappService } from './whatsapp.service';
@@ -7,7 +8,7 @@ import { WhatsappService } from './whatsapp.service';
 export class WhatsappController {
   private readonly logger = new Logger(WhatsappController.name);
   private readonly verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'autopecas_webhook_2026';
-  private readonly processedIds = new Set<string>();
+  private readonly processedIds = new Set();
 
   constructor(
     private readonly conversasService: ConversasService,
@@ -20,7 +21,7 @@ export class WhatsappController {
     @Query('hub.verify_token') token: string,
     @Query('hub.challenge') challenge: string,
   ) {
-    this.logger.log(`Webhook verificado: mode=${mode} token=${token}`);
+    this.logger.log(Webhook verificado: mode= token=);
     if (mode === 'subscribe' && token === this.verifyToken) {
       this.logger.log('Webhook aprovado!');
       return parseInt(challenge);
@@ -49,20 +50,24 @@ export class WhatsappController {
 
       if (msgId) {
         if (this.processedIds.has(msgId)) {
-          this.logger.warn(`Mensagem duplicada ignorada: ${msgId}`);
+          this.logger.warn(Mensagem duplicada ignorada: );
           return;
         }
         this.processedIds.add(msgId);
         setTimeout(() => this.processedIds.delete(msgId), 60000);
       }
 
-      this.logger.log(`Mensagem recebida de ${telefone}: ${texto}`);
+      this.logger.log(Mensagem recebida de : );
 
       const resposta = await this.conversasService.processarMensagem(telefone, texto);
       await this.whatsappService.enviarMensagem(telefone, resposta);
 
     } catch (error) {
-      this.logger.error(`Erro no webhook: ${error.message}`);
+      this.logger.error(Erro no webhook: );
     }
   }
 }
+'''
+with open('src/modules/whatsapp/whatsapp.controller.ts', 'w', encoding='utf-8') as f:
+    f.write(new_content)
+print('Arquivo salvo com sucesso!')
