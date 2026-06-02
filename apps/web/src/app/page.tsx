@@ -1,319 +1,323 @@
-'use client';
-import { useEffect, useState, useCallback } from 'react';
+﻿"use client";
+import { useEffect, useState, useCallback } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api` : 'http://localhost:3001/api';
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
-type Prioridade = 'BAIXA' | 'MEDIA' | 'ALTA' | 'URGENTE';
-type Status = 'PENDENTE' | 'EM_ANDAMENTO' | 'RESOLVIDO';
-
-interface Mensagem {
+type Handoff = {
   id: string;
-  origem: string;
-  conteudo: string;
-  timestamp: string;
-}
-
-interface Cliente {
-  id: string;
-  telefone: string;
-  nome: string | null;
-}
-
-interface Conversa {
-  id: string;
-  estadoAtual: string;
+  prioridade: string;
   status: string;
-  contexto: Record<string, any>;
-  cliente: Cliente;
-  mensagens: Mensagem[];
-}
+  cliente?: { nome?: string; telefone?: string };
+  peca?: string;
+  veiculo?: string;
+  vendedorId?: string;
+};
 
-interface Handoff {
-  id: string;
-  status: Status;
-  prioridade: Prioridade;
-  resumo: string;
-  slaMinutos: number;
-  createdAt: string;
-  conversa: Conversa;
-}
+type Metricas = {
+  leads: { total: number; atendidosIA: number; abandonados: number; taxaAtendimento: number; taxaAbandono: number };
+  vendas: { finalizadas: number; abandonadas: number; taxaConversao: number; receitaGerada: number; ticketMedio: number };
+  eficiencia: { horasEconomizadas: number; minutosEconomizadosPorLead: number };
+  vendedores: { codigo: string; finalizadas: number; abandonadas: number; total: number }[];
+};
 
-function tempoAtras(dateStr: string) {
-  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diff < 60) return `${diff}s atrás`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}min atrás`;
-  return `${Math.floor(diff / 3600)}h atrás`;
-}
-
-function BadgePrioridade({ p }: { p: Prioridade }) {
-  const map: Record<Prioridade, string> = {
-    URGENTE: 'bg-red-500/15 text-red-400 border border-red-500/30',
-    ALTA:    'bg-orange-500/15 text-orange-400 border border-orange-500/30',
-    MEDIA:   'bg-blue-500/15 text-blue-400 border border-blue-500/30',
-    BAIXA:   'bg-slate-500/10 text-slate-400 border border-slate-500/20',
-  };
-  return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${map[p]}`}>{p}</span>;
-}
-
-function BadgeStatus({ s }: { s: string }) {
-  const map: Record<string, string> = {
-    PENDENTE:     'bg-yellow-500/12 text-yellow-400 border border-yellow-500/25',
-    EM_ANDAMENTO: 'bg-blue-500/12 text-blue-400 border border-blue-500/25',
-    RESOLVIDO:    'bg-green-500/12 text-green-400 border border-green-500/25',
+function Badge({ texto }: { texto: string }) {
+  const cores: Record<string, string> = {
+    URGENTE: "#dc2626", ALTA: "#ea580c", MEDIA: "#d97706", BAIXA: "#16a34a",
+    PENDENTE: "#6b7280", EM_ANDAMENTO: "#2563eb", RESOLVIDO: "#16a34a", CANCELADO: "#dc2626",
   };
   return (
-    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${map[s] || 'bg-slate-500/10 text-slate-400'}`}>
-      {s.replace('_', ' ')}
+    <span style={{ background: cores[texto] ?? "#6b7280", color: "#fff", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
+      {texto}
     </span>
   );
 }
 
-function BadgeEstado({ s }: { s: string }) {
+function KpiCard({ label, valor, sub, cor }: { label: string; valor: string | number; sub?: string; cor?: string }) {
   return (
-    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/25">
-      {s.replace(/_/g, ' ')}
-    </span>
+    <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10, padding: "16px 20px", flex: 1, minWidth: 150 }}>
+      <p style={{ fontSize: 11, color: "#6b7280", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</p>
+      <p style={{ fontSize: 26, fontWeight: 700, margin: 0, color: cor ?? "#111827" }}>{valor}</p>
+      {sub && <p style={{ fontSize: 11, color: "#9ca3af", margin: "4px 0 0 0" }}>{sub}</p>}
+    </div>
   );
 }
 
-function PrioridadeFaixa({ p }: { p: Prioridade }) {
-  const map: Record<Prioridade, string> = {
-    URGENTE: 'bg-red-400',
-    ALTA:    'bg-orange-400',
-    MEDIA:   'bg-blue-400',
-    BAIXA:   'bg-slate-500',
-  };
-  return <div className={`h-0.5 w-full rounded-full mb-3 ${map[p]}`} />;
+function GraficoBarras({ dados, tipo }: { dados: Metricas["vendedores"]; tipo: "finalizadas" | "abandonadas" | "total" }) {
+  const cores = { finalizadas: "#16a34a", abandonadas: "#dc2626", total: "#2563eb" };
+  const max = Math.max(...dados.map((d) => d[tipo]), 1);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {dados.length === 0 && <p style={{ color: "#9ca3af", fontSize: 13 }}>Sem dados no período.</p>}
+      {dados.map((v) => (
+        <div key={v.codigo} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ width: 40, fontWeight: 700, fontSize: 13, textAlign: "center", background: "#f3f4f6", borderRadius: 4, padding: "3px 0" }}>{v.codigo}</span>
+          <div style={{ flex: 1, background: "#e5e7eb", borderRadius: 4, height: 10 }}>
+            <div style={{ width: `${Math.round((v[tipo] / max) * 100)}%`, background: cores[tipo], height: 10, borderRadius: 4, transition: "width 0.5s ease" }} />
+          </div>
+          <span style={{ width: 28, fontSize: 13, fontWeight: 700, color: cores[tipo], textAlign: "right" }}>{v[tipo]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GraficoPizza({ dados }: { dados: Metricas["vendedores"] }) {
+  const cores = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2"];
+  const total = dados.reduce((s, d) => s + d.finalizadas, 0) || 1;
+  let angulo = 0;
+  const fatias = dados.map((v, i) => {
+    const pct = v.finalizadas / total;
+    const ini = angulo;
+    angulo += pct * 360;
+    return { ...v, ini, fim: angulo, cor: cores[i % cores.length], pct };
+  });
+  const rad = (g: number) => (g * Math.PI) / 180;
+  function arco(cx: number, cy: number, r: number, ini: number, fim: number) {
+    const x1 = cx + r * Math.cos(rad(ini - 90)), y1 = cy + r * Math.sin(rad(ini - 90));
+    const x2 = cx + r * Math.cos(rad(fim - 90)), y2 = cy + r * Math.sin(rad(fim - 90));
+    return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${fim - ini > 180 ? 1 : 0} 1 ${x2} ${y2} Z`;
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 28, flexWrap: "wrap" }}>
+      <svg width={150} height={150} viewBox="0 0 150 150">
+        {dados.length === 0
+          ? <circle cx={75} cy={75} r={65} fill="#e5e7eb" />
+          : fatias.map((f, i) => f.fim - f.ini > 0.5 ? <path key={i} d={arco(75, 75, 65, f.ini, f.fim)} fill={f.cor} stroke="#fff" strokeWidth={2} /> : null)}
+      </svg>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {fatias.map((f, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <span style={{ width: 12, height: 12, borderRadius: 2, background: f.cor, flexShrink: 0 }} />
+            <span style={{ fontWeight: 700 }}>{f.codigo}</span>
+            <span style={{ color: "#6b7280" }}>{f.finalizadas} venda{f.finalizadas !== 1 ? "s" : ""} ({Math.round(f.pct * 100)}%)</span>
+          </div>
+        ))}
+        {dados.length === 0 && <span style={{ color: "#9ca3af", fontSize: 13 }}>Sem dados.</span>}
+      </div>
+    </div>
+  );
 }
 
 export default function Dashboard() {
+  const [aba, setAba] = useState<"operacional" | "admin">("operacional");
   const [handoffs, setHandoffs] = useState<Handoff[]>([]);
-  const [selecionado, setSelecionado] = useState<Handoff | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [ultimaAtualizacao, setUltimaAtualizacao] = useState('');
+  const [selecionado, setSelecionado] = useState<string | null>(null);
+  const [mensagem, setMensagem] = useState("");
+  const [vendedorCodigo, setVendedorCodigo] = useState("");
+  const [codigoErro, setCodigoErro] = useState("");
+  const [metricas, setMetricas] = useState<Metricas | null>(null);
+  const [graficoTipo, setGraficoTipo] = useState<"barras-finalizadas" | "barras-abandonadas" | "pizza">("barras-finalizadas");
+  const [carregando, setCarregando] = useState(false);
 
-  const carregar = useCallback(async () => {
-    try {
-      const res = await fetch(`${API}/handoff/pendentes`);
-      const data = await res.json();
-      setHandoffs(data);
-      setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'));
-    } catch (e) {
-      console.error(e);
-    }
+  const carregarHandoffs = useCallback(async () => {
+    try { const r = await fetch(`${API}/api/handoff/pendentes`); if (r.ok) setHandoffs(await r.json()); } catch {}
   }, []);
 
-  useEffect(() => {
-    carregar();
-    const interval = setInterval(carregar, 10000);
-    return () => clearInterval(interval);
-  }, [carregar]);
+  const carregarMetricas = useCallback(async () => {
+    setCarregando(true);
+    try { const r = await fetch(`${API}/api/admin/metricas`); if (r.ok) setMetricas(await r.json()); } catch {}
+    setCarregando(false);
+  }, []);
 
-  async function assumir(id: string) {
-    setLoading(true);
-    await fetch(`${API}/handoff/${id}/assumir`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vendedorId: 'vendedor-01' }),
-    });
-    await carregar();
-    setLoading(false);
-  }
+  useEffect(() => { carregarHandoffs(); }, [carregarHandoffs]);
+  useEffect(() => { if (aba === "admin") carregarMetricas(); }, [aba, carregarMetricas]);
 
-  async function resolver(id: string) {
-    setLoading(true);
-    await fetch(`${API}/handoff/${id}/resolver`, { method: 'POST' });
-    setSelecionado(null);
-    await carregar();
-    setLoading(false);
-  }
+  const validarCodigo = (v: string) => {
+    const limpo = v.replace(/\D/g, "").slice(0, 3);
+    setVendedorCodigo(limpo);
+    setCodigoErro(limpo.length > 0 && limpo.length < 3 ? "Codigo deve ter 3 digitos" : "");
+  };
 
-  const pendentes = handoffs.filter(h => h.status === 'PENDENTE');
-  const andamento = handoffs.filter(h => h.status === 'EM_ANDAMENTO');
+  const assumir = async (id: string) => {
+    if (vendedorCodigo.length !== 3) { setCodigoErro("Informe seu codigo de 3 digitos antes de assumir"); return; }
+    await fetch(`${API}/api/handoff/${id}/assumir`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendedorId: vendedorCodigo }) });
+    carregarHandoffs();
+  };
+
+  const resolver = async (id: string) => {
+    await fetch(`${API}/api/handoff/${id}/resolver`, { method: "POST" });
+    setSelecionado(null); carregarHandoffs();
+  };
+
+  const enviarMensagem = async () => {
+    if (!selecionado || !mensagem.trim() || vendedorCodigo.length !== 3) return;
+    await fetch(`${API}/api/handoff/${selecionado}/mensagem`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto: mensagem, vendedorId: vendedorCodigo }) });
+    setMensagem("");
+  };
+
+  const pendentes = handoffs.filter((h) => h.status === "PENDENTE");
+  const emAndamento = handoffs.filter((h) => h.status === "EM_ANDAMENTO");
+  const selecionadoObj = handoffs.find((h) => h.id === selecionado);
+
+  const botaoAba = (a: "operacional" | "admin", label: string) => (
+    <button onClick={() => setAba(a)} style={{ padding: "8px 22px", borderRadius: 6, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13, background: aba === a ? "#3b82f6" : "transparent", color: aba === a ? "#fff" : "#94a3b8" }}>
+      {label}
+    </button>
+  );
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: '#0f2040', color: '#e8f0fe', fontFamily: 'sans-serif' }}>
-
-      {/* Header */}
-      <header style={{ background: '#1a3a6b', borderBottom: '1px solid rgba(59,130,246,0.25)' }}
-        className="px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-lg"
-            style={{ background: '#2563b0' }}>⚙</div>
-          <div>
-            <div className="text-sm font-medium text-white">Autopeças MVP</div>
-            <div className="text-[11px]" style={{ color: '#93b4d8' }}>Painel Operacional</div>
-          </div>
+    <div style={{ fontFamily: "system-ui, sans-serif", minHeight: "100vh", background: "#f3f4f6" }}>
+      <header style={{ background: "#1e293b", color: "#fff", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>AutoPecas — Painel</h1>
+          <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>Gestao de atendimentos e analise operacional</p>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
-          <span className="text-[11px]" style={{ color: '#5a7fa8' }}>Atualizado: {ultimaAtualizacao}</span>
-          <button onClick={carregar}
-            style={{ background: '#1e3d6e', border: '1px solid rgba(59,130,246,0.3)', color: '#60a5fa' }}
-            className="text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 hover:opacity-80 transition-opacity">
-            ↻ Atualizar
-          </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          {botaoAba("operacional", "Operacional")}
+          {botaoAba("admin", "Admin / ROI")}
         </div>
       </header>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 px-6 py-4">
-        {[
-          { label: 'Pendentes', valor: pendentes.length, cor: '#f87171', faixa: '#f87171', icon: '⚠' },
-          { label: 'Em atendimento', valor: andamento.length, cor: '#60a5fa', faixa: '#3b82f6', icon: '🎧' },
-          { label: 'Total abertos', valor: handoffs.length, cor: '#34d399', faixa: '#34d399', icon: '☑' },
-        ].map(s => (
-          <div key={s.label}
-            style={{ background: '#162d52', border: '1px solid rgba(59,130,246,0.18)', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ height: 2, background: s.faixa }} />
-            <div className="px-4 py-3">
-              <div className="text-[10px] uppercase tracking-wider mb-1 flex items-center gap-1.5"
-                style={{ color: '#5a7fa8' }}>{s.icon} {s.label}</div>
-              <div className="text-3xl font-medium" style={{ color: s.cor }}>{s.valor}</div>
+      {aba === "operacional" && (
+        <main style={{ padding: 24, maxWidth: 1200, margin: "0 auto" }}>
+          <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
+            <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 20px", fontSize: 13 }}>
+              <span style={{ color: "#6b7280" }}>Pendentes </span><strong style={{ color: "#dc2626" }}>{pendentes.length}</strong>
+            </div>
+            <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 20px", fontSize: 13 }}>
+              <span style={{ color: "#6b7280" }}>Em atendimento </span><strong style={{ color: "#2563eb" }}>{emAndamento.length}</strong>
+            </div>
+            <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 20px", fontSize: 13 }}>
+              <span style={{ color: "#6b7280" }}>Total </span><strong>{handoffs.length}</strong>
+            </div>
+            <div style={{ marginLeft: "auto" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>Seu codigo (3 digitos)</label>
+                <input type="text" value={vendedorCodigo} onChange={(e) => validarCodigo(e.target.value)} maxLength={3} placeholder="000"
+                  style={{ width: 60, padding: "6px 10px", borderRadius: 6, border: `1.5px solid ${codigoErro ? "#dc2626" : "#d1d5db"}`, fontSize: 18, fontWeight: 700, textAlign: "center" }} />
+              </div>
+              {codigoErro && <p style={{ fontSize: 11, color: "#dc2626", margin: "4px 0 0 0" }}>{codigoErro}</p>}
             </div>
           </div>
-        ))}
-      </div>
 
-      {/* Main */}
-      <div className="flex flex-1 overflow-hidden gap-0 px-6 pb-6" style={{ height: 'calc(100vh - 196px)' }}>
-
-        {/* Lista */}
-        <div className="overflow-y-auto flex flex-col gap-2 pr-3" style={{ width: '44%' }}>
-          {handoffs.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 gap-3" style={{ color: '#5a7fa8' }}>
-              <span className="text-4xl">✅</span>
-              <span className="text-sm">Nenhum atendimento pendente</span>
-            </div>
-          )}
-          {handoffs.map(h => (
-            <div key={h.id} onClick={() => setSelecionado(h)}
-              style={{
-                background: selecionado?.id === h.id ? '#1e3d6e' : '#162d52',
-                border: `1px solid ${selecionado?.id === h.id ? '#3b82f6' : 'rgba(59,130,246,0.18)'}`,
-                borderRadius: 10, padding: 12, cursor: 'pointer', transition: 'all 0.15s',
-              }}>
-              <PrioridadeFaixa p={h.prioridade} />
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex gap-1.5 flex-wrap">
-                  <BadgePrioridade p={h.prioridade} />
-                  <BadgeStatus s={h.status} />
-                </div>
-                <span className="text-[10px]" style={{ color: '#5a7fa8' }}>{tempoAtras(h.createdAt)}</span>
-              </div>
-              <div className="text-xs font-medium mb-1 flex items-center gap-1.5" style={{ color: '#e8f0fe' }}>
-                <span style={{ color: '#60a5fa' }}>📱</span>
-                {h.conversa.cliente.nome || h.conversa.cliente.telefone}
-                {h.conversa.cliente.nome && (
-                  <span className="text-[10px]" style={{ color: '#5a7fa8' }}>— {h.conversa.cliente.telefone}</span>
-                )}
-              </div>
-              <div className="text-[11px] mb-3 truncate" style={{ color: '#93b4d8' }}>{h.resumo}</div>
-              <div className="flex gap-2">
-                {h.status === 'PENDENTE' && (
-                  <button onClick={e => { e.stopPropagation(); assumir(h.id); }} disabled={loading}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-opacity hover:opacity-80"
-                    style={{ background: '#2563b0' }}>
-                    👤 Assumir
-                  </button>
-                )}
-                {h.status === 'EM_ANDAMENTO' && (
-                  <button onClick={e => { e.stopPropagation(); resolver(h.id); }} disabled={loading}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-medium transition-opacity hover:opacity-80"
-                    style={{ background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }}>
-                    ✓ Resolver
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Detalhe */}
-        <div className="flex-1 flex flex-col overflow-hidden rounded-xl"
-          style={{ background: '#162d52', border: '1px solid rgba(59,130,246,0.18)' }}>
-
-          {!selecionado ? (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ color: '#5a7fa8' }}>
-              <span className="text-4xl" style={{ opacity: 0.3 }}>💬</span>
-              <span className="text-sm">← Selecione um atendimento</span>
-            </div>
-          ) : (
-            <>
-              {/* Det Header */}
-              <div className="px-4 py-3 flex-shrink-0" style={{ background: '#1e3d6e', borderBottom: '1px solid rgba(59,130,246,0.2)' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-sm font-medium flex items-center gap-2" style={{ color: '#e8f0fe' }}>
-                    <span style={{ color: '#60a5fa' }}>📱</span>
-                    {selecionado.conversa.cliente.nome || selecionado.conversa.cliente.telefone}
-                    {selecionado.conversa.cliente.nome && (
-                      <span className="text-[11px]" style={{ color: '#5a7fa8' }}>
-                        {selecionado.conversa.cliente.telefone}
-                      </span>
-                    )}
-                  </div>
-                  <BadgeEstado s={selecionado.conversa.estadoAtual} />
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {Object.entries(selecionado.conversa.contexto)
-                    .filter(([k]) => k !== 'intent' && k !== 'ultimaAcao')
-                    .map(([k, v]) => (
-                      <div key={k}
-                        style={{ background: '#162d52', border: '1px solid rgba(59,130,246,0.18)', borderRadius: 6 }}
-                        className="px-2 py-0.5 text-[10px]">
-                        <span style={{ color: '#60a5fa' }}>{k}:</span>{' '}
-                        <span style={{ color: '#e8f0fe' }}>{String(v)}</span>
-                      </div>
-                    ))}
-                </div>
-              </div>
-
-              {/* Chat */}
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
-                {[...selecionado.conversa.mensagens].reverse().map(m => (
-                  <div key={m.id} className={`flex ${m.origem === 'CLIENTE' ? 'justify-end' : 'justify-start'}`}>
-                    <div className="max-w-xs px-3 py-2 rounded-xl text-[11px] leading-relaxed"
-                      style={{
-                        background: m.origem === 'CLIENTE' ? '#2563b0'
-                          : m.origem === 'IA' ? '#1e3d6e'
-                          : 'rgba(52,211,153,0.1)',
-                        color: m.origem === 'CLIENTE' ? '#fff'
-                          : m.origem === 'IA' ? '#e8f0fe'
-                          : '#34d399',
-                        border: m.origem === 'CLIENTE' ? 'none'
-                          : m.origem === 'IA' ? '1px solid rgba(59,130,246,0.2)'
-                          : '1px solid rgba(52,211,153,0.2)',
-                        borderBottomRightRadius: m.origem === 'CLIENTE' ? 3 : 11,
-                        borderBottomLeftRadius: m.origem !== 'CLIENTE' ? 3 : 11,
-                      }}>
-                      <div className="text-[9px] font-semibold mb-1 opacity-60">{m.origem}</div>
-                      <div className="whitespace-pre-wrap">{m.conteudo}</div>
+          <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 300 }}>
+              {handoffs.length === 0 && <p style={{ color: "#6b7280", textAlign: "center", marginTop: 40 }}>Nenhum atendimento no momento.</p>}
+              {handoffs.map((h) => (
+                <div key={h.id} onClick={() => setSelecionado(h.id === selecionado ? null : h.id)}
+                  style={{ background: selecionado === h.id ? "#eff6ff" : "#fff", border: `1.5px solid ${selecionado === h.id ? "#3b82f6" : "#e5e7eb"}`, borderRadius: 10, padding: 16, marginBottom: 10, cursor: "pointer" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{h.cliente?.nome ?? h.cliente?.telefone ?? "Cliente"}</p>
+                      <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "#6b7280" }}>{h.peca}{h.veiculo ? ` | ${h.veiculo}` : ""}</p>
+                    </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <Badge texto={h.prioridade} />
+                      <Badge texto={h.status} />
                     </div>
                   </div>
-                ))}
-              </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {h.status === "PENDENTE" && (
+                      <button onClick={(e) => { e.stopPropagation(); assumir(h.id); }}
+                        style={{ padding: "6px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                        Assumir
+                      </button>
+                    )}
+                    {h.status === "EM_ANDAMENTO" && (
+                      <button onClick={(e) => { e.stopPropagation(); resolver(h.id); }}
+                        style={{ padding: "6px 14px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                        Resolver
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
 
-              {/* Footer */}
-              <div className="p-3 flex-shrink-0" style={{ borderTop: '1px solid rgba(59,130,246,0.2)', background: '#1e3d6e' }}>
-                {selecionado.status === 'PENDENTE' && (
-                  <button onClick={() => assumir(selecionado.id)} disabled={loading}
-                    className="w-full py-2.5 rounded-lg text-sm font-medium text-white flex items-center justify-center gap-2 hover:opacity-80 transition-opacity"
-                    style={{ background: '#2563b0' }}>
-                    👤 Assumir Atendimento
+            {selecionadoObj && (
+              <div style={{ width: 340, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 20 }}>
+                <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 700 }}>Chat — {selecionadoObj.cliente?.nome ?? selecionadoObj.cliente?.telefone}</h3>
+                <div style={{ background: "#f9fafb", borderRadius: 8, padding: 12, minHeight: 120, marginBottom: 12, fontSize: 13, color: "#6b7280" }}>
+                  Historico de mensagens aparece aqui.
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input type="text" value={mensagem} onChange={(e) => setMensagem(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagem()} placeholder="Digite a resposta..."
+                    style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1.5px solid #d1d5db", fontSize: 13 }} />
+                  <button onClick={enviarMensagem}
+                    style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                    Enviar
                   </button>
-                )}
-                {selecionado.status === 'EM_ANDAMENTO' && (
-                  <button onClick={() => resolver(selecionado.id)} disabled={loading}
-                    className="w-full py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 hover:opacity-80 transition-opacity"
-                    style={{ background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }}>
-                    ✓ Marcar como Resolvido
-                  </button>
-                )}
+                </div>
               </div>
+            )}
+          </div>
+        </main>
+      )}
+
+      {aba === "admin" && (
+        <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
+          {carregando && <p style={{ color: "#6b7280", textAlign: "center", marginTop: 60 }}>Carregando metricas...</p>}
+          {!carregando && !metricas && <p style={{ color: "#dc2626", textAlign: "center", marginTop: 60 }}>Nao foi possivel carregar as metricas. Verifique se a API esta online.</p>}
+
+          {metricas && (
+            <>
+              <section style={{ marginBottom: 28 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, margin: "0 0 12px 0" }}>Visao Geral do Mes</p>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <KpiCard label="Leads recebidos" valor={metricas.leads.total} sub="total do periodo" />
+                  <KpiCard label="Atendidos pela IA" valor={`${metricas.leads.taxaAtendimento}%`} sub={`${metricas.leads.atendidosIA} atendimentos`} cor="#2563eb" />
+                  <KpiCard label="Taxa de abandono" valor={`${metricas.leads.taxaAbandono}%`} sub={`${metricas.leads.abandonados} abandonados`} cor="#dc2626" />
+                  <KpiCard label="Vendas realizadas" valor={metricas.vendas.finalizadas} sub={`Conversao ${metricas.vendas.taxaConversao}%`} cor="#16a34a" />
+                </div>
+              </section>
+
+              <section style={{ marginBottom: 28 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, margin: "0 0 12px 0" }}>ROI da Automacao</p>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <KpiCard label="Receita gerada" valor={`R$ ${metricas.vendas.receitaGerada.toLocaleString("pt-BR")}`} sub={`Ticket medio R$ ${metricas.vendas.ticketMedio}`} cor="#16a34a" />
+                  <KpiCard label="Horas economizadas" valor={`${metricas.eficiencia.horasEconomizadas}h`} sub={`${metricas.eficiencia.minutosEconomizadosPorLead} min por lead`} cor="#7c3aed" />
+                  <KpiCard label="Vendas abandonadas" valor={metricas.vendas.abandonadas} sub="handoffs nao resolvidos" cor="#dc2626" />
+                  <KpiCard label="Ticket medio" valor={`R$ ${metricas.vendas.ticketMedio}`} sub="estimativa configuravel" />
+                </div>
+              </section>
+
+              <section style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 24 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, margin: 0 }}>Desempenho por Vendedor</p>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {([["barras-finalizadas", "Vendas"], ["barras-abandonadas", "Abandonadas"], ["pizza", "Pizza"]] as const).map(([v, l]) => (
+                      <button key={v} onClick={() => setGraficoTipo(v)}
+                        style={{ padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${graficoTipo === v ? "#2563eb" : "#d1d5db"}`, background: graficoTipo === v ? "#eff6ff" : "#fff", color: graficoTipo === v ? "#2563eb" : "#6b7280" }}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {graficoTipo === "pizza"
+                  ? <GraficoPizza dados={metricas.vendedores} />
+                  : <GraficoBarras dados={metricas.vendedores} tipo={graficoTipo === "barras-finalizadas" ? "finalizadas" : "abandonadas"} />}
+
+                <div style={{ marginTop: 24, overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+                        {["Cod. Vendedor", "Total", "Finalizadas", "Abandonadas", "Taxa conv."].map((h) => (
+                          <th key={h} style={{ padding: "8px 14px", textAlign: "left", fontWeight: 600, color: "#374151" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {metricas.vendedores.map((v) => (
+                        <tr key={v.codigo} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                          <td style={{ padding: "10px 14px", fontWeight: 700, fontSize: 15 }}>{v.codigo}</td>
+                          <td style={{ padding: "10px 14px" }}>{v.total}</td>
+                          <td style={{ padding: "10px 14px", color: "#16a34a", fontWeight: 600 }}>{v.finalizadas}</td>
+                          <td style={{ padding: "10px 14px", color: "#dc2626" }}>{v.abandonadas}</td>
+                          <td style={{ padding: "10px 14px" }}>{v.total > 0 ? `${Math.round((v.finalizadas / v.total) * 100)}%` : "—"}</td>
+                        </tr>
+                      ))}
+                      {metricas.vendedores.length === 0 && (
+                        <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>Sem dados de vendedores no periodo.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </>
           )}
-        </div>
-      </div>
+        </main>
+      )}
     </div>
   );
 }

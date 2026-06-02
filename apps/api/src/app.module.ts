@@ -10,6 +10,7 @@ import { HandoffModule } from './modules/handoff/handoff.module';
 import { WorkflowsModule } from './modules/workflows/workflows.module';
 import { InatividadeService } from './modules/whatsapp/inatividade.service';
 import { HealthController } from './health.controller';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { HealthController } from './health.controller';
     HandoffModule,
     WorkflowsModule,
     WhatsappModule,
+    AdminModule,
   ],
   controllers: [HealthController],
 })
