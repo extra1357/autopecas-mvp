@@ -56,22 +56,45 @@ export class ConversasService {
       data: { conversaId: conversa.id, origem: 'CLIENTE', conteudo: mensagem },
     });
 
+    // ── BLOQUEIO: vendedor ja assumiu — IA nao responde mais ──────────────
     if (conversa.status === 'AGUARDANDO_HUMANO' || conversa.status === 'EM_ATENDIMENTO') {
-      const historico = await this.buscarHistoricoTexto(conversa.id);
-      const intencao = await this.aiService.classificarIntencao(mensagem, historico);
-      if (intencao.intent === 'encerrar_conversa') {
-        await this.prisma.conversa.update({
-          where: { id: conversa.id },
-          data: { status: 'FINALIZADA', estadoAtual: 'FINALIZADA' },
-        });
-        await this.prisma.mensagem.create({
-          data: { conversaId: conversa.id, origem: 'IA', conteudo: 'De nada! Foi um prazer atender voce. Qualquer duvida estamos aqui. Ate logo! 👋' },
-        });
-        return 'De nada! Foi um prazer atender voce. Qualquer duvida estamos aqui. Ate logo! 👋';
-      }
-      return 'Um vendedor ja esta sendo notificado. Aguarde!';
+      this.logger.log(`Conversa ${conversa.id} em atendimento humano — IA silenciosa`);
+      return '';
     }
 
+    // ── COLETA DE NOME: primeira mensagem sem nome salvo ─────────────────
+    const contextoAtual = (conversa.contexto as Record<string, any>) || {};
+    if (!cliente.nome && !contextoAtual.aguardandoNome && conversa.estadoAtual === 'INICIO') {
+      await this.prisma.conversa.update({
+        where: { id: conversa.id },
+        data: { contexto: { ...contextoAtual, aguardandoNome: true } },
+      });
+      const resposta = 'Ola! Bem-vindo a nossa loja de autopecas! 😊\n\nPrimeiro, pode me dizer seu nome?';
+      await this.prisma.mensagem.create({
+        data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
+      });
+      return resposta;
+    }
+
+    if (contextoAtual.aguardandoNome && !cliente.nome) {
+      const nome = mensagem.trim().split(' ')[0];
+      await this.prisma.cliente.update({
+        where: { id: cliente.id },
+        data: { nome: mensagem.trim() },
+      });
+      await this.prisma.conversa.update({
+        where: { id: conversa.id },
+        data: { contexto: { ...contextoAtual, aguardandoNome: false } },
+      });
+      cliente = { ...cliente, nome: mensagem.trim() };
+      const resposta = `Prazer, ${nome}! 👋\n\nQual peca voce esta procurando? Me informe tambem o modelo e ano do veiculo.`;
+      await this.prisma.mensagem.create({
+        data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
+      });
+      return resposta;
+    }
+
+    // ── FLUXO NORMAL ─────────────────────────────────────────────────────
     const historico = await this.buscarHistoricoTexto(conversa.id);
     const intencao = await this.aiService.classificarIntencao(mensagem, historico);
     this.logger.log(`Intent: ${intencao.intent} | Confianca: ${intencao.confianca} | Estado: ${conversa.estadoAtual}`);
@@ -89,11 +112,13 @@ export class ConversasService {
         where: { id: conversa.id },
         data: { status: 'AGUARDANDO_HUMANO', estadoAtual: 'AGUARDANDO_VENDEDOR' },
       });
-      return 'Vou chamar um vendedor. Em ate 10 minutos alguem entrara em contato!';
+      const nomeCliente = cliente.nome ? `, ${cliente.nome.split(' ')[0]}` : '';
+      return `Vou chamar um vendedor${nomeCliente}. Em ate 10 minutos alguem entrara em contato!`;
     }
 
     if (intencao.intent === 'saudacao') {
-      return 'Ola! Bem-vindo a nossa loja de autopecas!\n\nQual peca voce esta procurando? Me informe tambem o modelo e ano do veiculo.';
+      const nomeCliente = cliente.nome ? `, ${cliente.nome.split(' ')[0]}` : '';
+      return `Ola${nomeCliente}! Como posso te ajudar?\n\nQual peca voce esta procurando? Me informe tambem o modelo e ano do veiculo.`;
     }
 
     if (intencao.intent === 'desconhecido' || intencao.confianca < 0.6) {
