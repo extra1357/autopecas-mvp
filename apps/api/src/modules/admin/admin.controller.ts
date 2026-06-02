@@ -1,6 +1,13 @@
 ﻿import { Controller, Get, Query } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+interface VendedorStat {
+  codigo: string;
+  finalizadas: number;
+  abandonadas: number;
+  total: number;
+}
+
 @Controller('admin')
 export class AdminController {
   constructor(private readonly prisma: PrismaService) {}
@@ -37,9 +44,9 @@ export class AdminController {
     });
 
     const vendaFinalizada = handoffs.filter((h) => h.status === 'RESOLVIDO');
-    const vendaAbandonada = handoffs.filter((h) => h.status === 'CANCELADO');
+    const vendaAbandonada = handoffs.filter((h) => h.status === 'EXPIRADO');
 
-    const porVendedor: Record<string, { codigo: string; finalizadas: number; abandonadas: number; total: number }> = {};
+    const porVendedor: Record<string, VendedorStat> = {};
 
     for (const h of handoffs) {
       const codigo = (h.vendedorId ?? 'SEM').slice(0, 3).toUpperCase();
@@ -48,7 +55,7 @@ export class AdminController {
       }
       porVendedor[codigo].total += 1;
       if (h.status === 'RESOLVIDO') porVendedor[codigo].finalizadas += 1;
-      if (h.status === 'CANCELADO') porVendedor[codigo].abandonadas += 1;
+      if (h.status === 'EXPIRADO') porVendedor[codigo].abandonadas += 1;
     }
 
     const ticketMedio = 350;
