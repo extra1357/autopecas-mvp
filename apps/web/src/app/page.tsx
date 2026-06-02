@@ -135,7 +135,11 @@ export default function Dashboard() {
     setCarregando(false);
   }, []);
 
-  useEffect(() => { carregarHandoffs(); const t = setInterval(carregarHandoffs, 15000); return () => clearInterval(t); }, [carregarHandoffs]);
+  useEffect(() => {
+    carregarHandoffs();
+    const id = setInterval(() => { carregarHandoffs(); }, 8000);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => { if (aba === "admin") carregarMetricas(); }, [aba, carregarMetricas]);
 
   const validarCodigo = (v: string) => {
