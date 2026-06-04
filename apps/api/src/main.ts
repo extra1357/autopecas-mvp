@@ -1,4 +1,4 @@
-import { NestFactory } from '@nestjs/core';
+﻿import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
@@ -17,8 +17,8 @@ async function bootstrap() {
   app.enableCors();
 
   const config = new DocumentBuilder()
-    .setTitle('Autopeças MVP API')
-    .setDescription('Middleware operacional conversacional para autopeças')
+    .setTitle('AutopeÃ§as MVP API')
+    .setDescription('Middleware operacional conversacional para autopeÃ§as')
     .setVersion('0.1.0')
     .build();
 
@@ -27,8 +27,10 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3001;
   await app.listen(port);
-  console.log(`🚀 API rodando em http://localhost:${port}`);
-  console.log(`📚 Docs em http://localhost:${port}/docs`);
+  console.log(`ðŸš€ API rodando em http://localhost:${port}`);
+  console.log(`ðŸ“š Docs em http://localhost:${port}/docs`);
 }
 
+// v2
 bootstrap();
+
