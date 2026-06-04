@@ -35,7 +35,7 @@ export class AdminController {
       where: {
         createdAt: { gte: inicioMes, lte: fimMes },
         status: { in: ['FINALIZADA', 'AGUARDANDO_HUMANO'] },
-        atendimentos: { none: { status: 'RESOLVIDO' } },
+        atendimento: { none: { status: 'RESOLVIDO' } },
       },
     });
 
@@ -75,5 +75,6 @@ export class AdminController {
     };
   }
 }
+
 
 
