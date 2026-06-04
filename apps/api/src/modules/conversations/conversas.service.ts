@@ -35,10 +35,11 @@ export class ConversasService {
   }
 
   async processarMensagem(telefone: string, mensagem: string): Promise<string> {
-    this.logger.log(`Processando mensagem de ${telefone}: "${mensagem}"`);
+    this.logger.log(`[Conversas] Processando mensagem de ${telefone}: "${mensagem}"`);
 
     let cliente = await this.prisma.cliente.findUnique({ where: { telefone } });
     if (!cliente) {
+      this.logger.log(`[Conversas] Novo cliente criado | telefone=${telefone}`);
       cliente = await this.prisma.cliente.create({ data: { telefone } });
     }
 
@@ -47,22 +48,21 @@ export class ConversasService {
       orderBy: { createdAt: 'desc' },
     });
     if (!conversa) {
-      conversa = await this.prisma.conversa.create({
-        data: { clienteId: cliente.id },
-      });
+      this.logger.log(`[Conversas] Nova conversa criada para cliente=${cliente.id}`);
+      conversa = await this.prisma.conversa.create({ data: { clienteId: cliente.id } });
     }
 
     await this.prisma.mensagem.create({
       data: { conversaId: conversa.id, origem: 'CLIENTE', conteudo: mensagem },
     });
 
-    // ── BLOQUEIO: vendedor ja assumiu — IA nao responde mais ──────────────
+    // BLOQUEIO: vendedor ja assumiu
     if (conversa.status === 'AGUARDANDO_HUMANO' || conversa.status === 'EM_ATENDIMENTO') {
-      this.logger.log(`Conversa ${conversa.id} em atendimento humano — IA silenciosa`);
+      this.logger.warn(`[Conversas] Mensagem de ${telefone} ignorada — conversa=${conversa.id} status=${conversa.status}`);
       return '';
     }
 
-    // ── COLETA DE NOME: primeira mensagem sem nome salvo ─────────────────
+    // COLETA DE NOME
     const contextoAtual = (conversa.contexto as Record<string, any>) || {};
     if (!cliente.nome && !contextoAtual.aguardandoNome && conversa.estadoAtual === 'INICIO') {
       await this.prisma.conversa.update({
@@ -78,15 +78,13 @@ export class ConversasService {
 
     if (contextoAtual.aguardandoNome && !cliente.nome) {
       const nome = mensagem.trim().split(' ')[0];
-      await this.prisma.cliente.update({
-        where: { id: cliente.id },
-        data: { nome: mensagem.trim() },
-      });
+      await this.prisma.cliente.update({ where: { id: cliente.id }, data: { nome: mensagem.trim() } });
       await this.prisma.conversa.update({
         where: { id: conversa.id },
         data: { contexto: { ...contextoAtual, aguardandoNome: false } },
       });
       cliente = { ...cliente, nome: mensagem.trim() };
+      this.logger.log(`[Conversas] Nome coletado: "${mensagem.trim()}" para cliente=${cliente.id}`);
       const resposta = `Prazer, ${nome}! 👋\n\nQual peca voce esta procurando? Me informe tambem o modelo e ano do veiculo.`;
       await this.prisma.mensagem.create({
         data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
@@ -94,10 +92,17 @@ export class ConversasService {
       return resposta;
     }
 
-    // ── FLUXO NORMAL ─────────────────────────────────────────────────────
+    // FLUXO NORMAL
     const historico = await this.buscarHistoricoTexto(conversa.id);
-    const intencao = await this.aiService.classificarIntencao(mensagem, historico);
-    this.logger.log(`Intent: ${intencao.intent} | Confianca: ${intencao.confianca} | Estado: ${conversa.estadoAtual}`);
+    let intencao: any;
+    try {
+      intencao = await this.aiService.classificarIntencao(mensagem, historico);
+    } catch (error) {
+      this.logger.error(`[Conversas] ❌ Falha ao classificar intenção | conversa=${conversa.id} | telefone=${telefone} | erro=${error.message}`);
+      return 'Desculpe, tive um problema interno. Pode repetir sua mensagem?';
+    }
+
+    this.logger.log(`[Conversas] Intent=${intencao.intent} | Confianca=${intencao.confianca} | Estado=${conversa.estadoAtual} | conversa=${conversa.id}`);
 
     if (intencao.intent === 'falar_vendedor') {
       await this.handoffService.criarHandoff({
@@ -112,6 +117,7 @@ export class ConversasService {
         where: { id: conversa.id },
         data: { status: 'AGUARDANDO_HUMANO', estadoAtual: 'AGUARDANDO_VENDEDOR' },
       });
+      this.logger.log(`[Conversas] ✅ Handoff criado por solicitacao do cliente | conversa=${conversa.id} | telefone=${telefone}`);
       const nomeCliente = cliente.nome ? `, ${cliente.nome.split(' ')[0]}` : '';
       return `Vou chamar um vendedor${nomeCliente}. Em ate 10 minutos alguem entrara em contato!`;
     }
@@ -125,6 +131,7 @@ export class ConversasService {
       const mensagensCount = await this.prisma.mensagem.count({
         where: { conversaId: conversa.id, origem: 'CLIENTE' },
       });
+      this.logger.warn(`[Conversas] Intent desconhecido | confianca=${intencao.confianca} | mensagensCount=${mensagensCount} | conversa=${conversa.id}`);
       if (mensagensCount >= 3) {
         await this.handoffService.criarHandoff({
           conversaId: conversa.id,
@@ -138,6 +145,7 @@ export class ConversasService {
           where: { id: conversa.id },
           data: { status: 'AGUARDANDO_HUMANO', estadoAtual: 'AGUARDANDO_VENDEDOR' },
         });
+        this.logger.log(`[Conversas] ✅ Handoff criado por multiplas mensagens sem resolucao | conversa=${conversa.id}`);
         return 'Nao consegui entender. Vou chamar um vendedor para te ajudar!';
       }
       return 'Desculpe, nao entendi. Pode me dizer qual peca precisa e para qual veiculo?';
@@ -160,7 +168,17 @@ export class ConversasService {
       contexto: conversa.contexto as Record<string, any>,
     };
 
-    const resultado = await this.workflowEngine.executar(ctx);
+    let resultado: any;
+    try {
+      resultado = await this.workflowEngine.executar(ctx);
+    } catch (error) {
+      this.logger.error(`[Conversas] ❌ Falha no workflow | conversa=${conversa.id} | intent=${intencao.intent} | erro=${error.message}`);
+      return 'Desculpe, tive um problema interno. Pode repetir sua mensagem?';
+    }
+
+    if (!resultado?.resposta) {
+      this.logger.error(`[Conversas] ❌ Workflow retornou resposta vazia | conversa=${conversa.id} | intent=${intencao.intent}`);
+    }
 
     await this.prisma.mensagem.create({
       data: { conversaId: conversa.id, origem: 'IA', conteudo: resultado.resposta },
@@ -171,6 +189,7 @@ export class ConversasService {
         where: { id: conversa.id },
         data: { status: 'FINALIZADA', estadoAtual: 'FINALIZADA' },
       });
+      this.logger.log(`[Conversas] Conversa ${conversa.id} finalizada`);
       return resultado.resposta;
     }
 
@@ -199,6 +218,7 @@ export class ConversasService {
         where: { id: conversa.id },
         data: { status: 'AGUARDANDO_HUMANO' },
       });
+      this.logger.log(`[Conversas] ✅ Handoff criado pelo workflow | motivo=${resultado.handoff.motivo} | conversa=${conversa.id}`);
     }
 
     return resultado.resposta;
