@@ -31,11 +31,12 @@ export class AdminController {
       },
     });
 
+    // Conversas que chegaram ao handoff mas não foram resolvidas
     const abandonados = await this.prisma.conversa.count({
       where: {
         createdAt: { gte: inicioMes, lte: fimMes },
-        status: { in: ['FINALIZADA', 'AGUARDANDO_HUMANO'] },
-        atendimento: { none: { status: 'RESOLVIDO' } },
+        status: { in: ['FINALIZADA', 'AGUARDANDO_HUMANO', 'EXPIRADA'] },
+        atendimento: { is: { status: { not: 'RESOLVIDO' } } },
       },
     });
 
@@ -44,10 +45,11 @@ export class AdminController {
     });
 
     const vendaFinalizada = handoffs.filter((h) => h.status === 'RESOLVIDO');
-    const vendaAbandonada = handoffs.filter((h) => h.status === 'EXPIRADO' || h.status === 'PENDENTE' || h.status === 'EM_ANDAMENTO');
+    const vendaAbandonada = handoffs.filter(
+      (h) => h.status === 'EXPIRADO' || h.status === 'PENDENTE' || h.status === 'EM_ANDAMENTO',
+    );
 
     const porVendedor: Record<string, VendedorStat> = {};
-
     for (const h of handoffs) {
       const codigo = (h.vendedorId ?? 'SEM').slice(0, 3).toUpperCase();
       if (!porVendedor[codigo]) {
@@ -55,7 +57,8 @@ export class AdminController {
       }
       porVendedor[codigo].total += 1;
       if (h.status === 'RESOLVIDO') porVendedor[codigo].finalizadas += 1;
-      if (h.status === 'EXPIRADO' || h.status === 'PENDENTE' || h.status === 'EM_ANDAMENTO') porVendedor[codigo].abandonadas += 1;
+      if (h.status === 'EXPIRADO' || h.status === 'PENDENTE' || h.status === 'EM_ANDAMENTO')
+        porVendedor[codigo].abandonadas += 1;
     }
 
     const ticketMedio = 350;
@@ -75,6 +78,3 @@ export class AdminController {
     };
   }
 }
-
-
-
