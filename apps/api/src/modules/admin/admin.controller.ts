@@ -34,8 +34,8 @@ export class AdminController {
     const abandonados = await this.prisma.conversa.count({
       where: {
         createdAt: { gte: inicioMes, lte: fimMes },
-        status: 'FINALIZADA',
-        mensagens: { none: { origem: { in: ['IA', 'HUMANO'] } } },
+        status: { in: ['FINALIZADA', 'AGUARDANDO_HUMANO'] },
+        atendimentos: { none: { status: 'RESOLVIDO' } },
       },
     });
 
@@ -44,7 +44,7 @@ export class AdminController {
     });
 
     const vendaFinalizada = handoffs.filter((h) => h.status === 'RESOLVIDO');
-    const vendaAbandonada = handoffs.filter((h) => h.status === 'EXPIRADO');
+    const vendaAbandonada = handoffs.filter((h) => h.status === 'EXPIRADO' || h.status === 'PENDENTE' || h.status === 'EM_ANDAMENTO');
 
     const porVendedor: Record<string, VendedorStat> = {};
 
@@ -55,7 +55,7 @@ export class AdminController {
       }
       porVendedor[codigo].total += 1;
       if (h.status === 'RESOLVIDO') porVendedor[codigo].finalizadas += 1;
-      if (h.status === 'EXPIRADO') porVendedor[codigo].abandonadas += 1;
+      if (h.status === 'EXPIRADO' || h.status === 'PENDENTE' || h.status === 'EM_ANDAMENTO') porVendedor[codigo].abandonadas += 1;
     }
 
     const ticketMedio = 350;
@@ -75,3 +75,5 @@ export class AdminController {
     };
   }
 }
+
+
