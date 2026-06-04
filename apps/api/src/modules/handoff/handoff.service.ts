@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { Subject } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface HandoffPayload {
@@ -16,12 +17,26 @@ export interface HandoffPayload {
   slaMinutos: number;
 }
 
+// Evento SSE emitido para o dashboard
+export interface HandoffSseEvent {
+  tipo: 'novo' | 'assumido' | 'resolvido';
+  atendimentoId: string;
+}
+
 @Injectable()
 export class HandoffService {
+  // Subject RxJS — cada conexão SSE do dashboard recebe os eventos
+  private readonly sseStream$ = new Subject<HandoffSseEvent>();
+
   constructor(
     @InjectQueue('handoff') private handoffQueue: Queue,
     private prisma: PrismaService,
   ) {}
+
+  /** Retorna o Observable que o controller expõe via @Sse() */
+  getSseStream() {
+    return this.sseStream$.asObservable();
+  }
 
   async criarHandoff(payload: HandoffPayload) {
     // Verifica se já existe handoff pendente para essa conversa
@@ -69,17 +84,34 @@ export class HandoffService {
     );
 
     console.log(`[Handoff] Criado atendimento ${atendimento.id} — prioridade: ${payload.prioridade}`);
+
+    // Notifica todos os dashboards conectados via SSE
+    this.sseStream$.next({ tipo: 'novo', atendimentoId: atendimento.id });
+
     return atendimento;
   }
 
   async assumirAtendimento(atendimentoId: string, vendedorId: string) {
-    const atendimento = await this.prisma.atendimento.update({
-      where: { id: atendimentoId },
+    // ── LOCK OTIMISTA ────────────────────────────────────────────────────
+    // O updateMany só atualiza se o status ainda for PENDENTE.
+    // Se outro vendedor assumiu primeiro, count === 0 e retornamos 409.
+    const resultado = await this.prisma.atendimento.updateMany({
+      where: { id: atendimentoId, status: 'PENDENTE' },
       data: {
         vendedorId,
         status: 'EM_ANDAMENTO',
         iniciadoEm: new Date(),
       },
+    });
+
+    if (resultado.count === 0) {
+      // Nenhum registro atualizado — já foi assumido por outro vendedor
+      throw new ConflictException('Atendimento já foi assumido por outro vendedor');
+    }
+
+    // Busca o atendimento atualizado para retornar ao frontend
+    const atendimento = await this.prisma.atendimento.findUnique({
+      where: { id: atendimentoId },
       include: { conversa: { include: { cliente: true } } },
     });
 
@@ -95,6 +127,9 @@ export class HandoffService {
         payload: { vendedorId, atendimentoId },
       },
     });
+
+    // Notifica todos os dashboards — este atendimento saiu da fila
+    this.sseStream$.next({ tipo: 'assumido', atendimentoId });
 
     return atendimento;
   }
@@ -115,6 +150,9 @@ export class HandoffService {
         estadoAtual: 'FINALIZADO',
       },
     });
+
+    // Notifica todos os dashboards
+    this.sseStream$.next({ tipo: 'resolvido', atendimentoId });
 
     return atendimento;
   }
