@@ -1,5 +1,5 @@
-﻿"use client";
-import { useEffect, useState, useCallback } from "react";
+"use client";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -45,6 +45,25 @@ function Badge({ texto }: { texto: string }) {
     <span style={{ background: cores[texto] ?? "#6b7280", color: "#fff", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
       {texto}
     </span>
+  );
+}
+
+function Toast({ mensagem, tipo, onClose }: { mensagem: string; tipo: "erro" | "info"; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 4000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+  return (
+    <div style={{
+      position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+      background: tipo === "erro" ? "#dc2626" : "#2563eb",
+      color: "#fff", borderRadius: 10, padding: "14px 20px",
+      fontSize: 14, fontWeight: 600, boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+      display: "flex", alignItems: "center", gap: 12, maxWidth: 360,
+    }}>
+      <span>{mensagem}</span>
+      <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 0, marginLeft: "auto" }}>×</button>
+    </div>
   );
 }
 
@@ -124,9 +143,30 @@ export default function Dashboard() {
   const [metricas, setMetricas] = useState<Metricas | null>(null);
   const [graficoTipo, setGraficoTipo] = useState<"barras-finalizadas" | "barras-abandonadas" | "pizza">("barras-finalizadas");
   const [carregando, setCarregando] = useState(false);
+  const [toast, setToast] = useState<{ mensagem: string; tipo: "erro" | "info" } | null>(null);
+
+  // ── BLOQUEIO ANTI-CORRIDA ──────────────────────────────────────────────
+  // atendimentoAtivo: ID do atendimento que ESTE vendedor está atendendo agora.
+  // Enquanto estiver preenchido, o input de código fica bloqueado e os botões
+  // "Assumir" de outros cards ficam desabilitados.
+  const [atendimentoAtivo, setAtendimentoAtivo] = useState<string | null>(null);
 
   const carregarHandoffs = useCallback(async () => {
-    try { const r = await fetch(`${API}/api/handoff/pendentes`); if (r.ok) setHandoffs(await r.json()); } catch {}
+    try {
+      const r = await fetch(`${API}/api/handoff/pendentes`);
+      if (r.ok) {
+        const dados: Handoff[] = await r.json();
+        setHandoffs(dados);
+
+        // Se o atendimento que este vendedor estava atendendo sumiu da lista
+        // (foi resolvido ou expirou), libera o bloqueio automaticamente
+        setAtendimentoAtivo((atual) => {
+          if (!atual) return null;
+          const aindaExiste = dados.some((h) => h.id === atual && h.status === "EM_ANDAMENTO");
+          return aindaExiste ? atual : null;
+        });
+      }
+    } catch {}
   }, []);
 
   const carregarMetricas = useCallback(async () => {
@@ -135,33 +175,94 @@ export default function Dashboard() {
     setCarregando(false);
   }, []);
 
+  // ── SSE: substitui o setInterval de 8s ────────────────────────────────
   useEffect(() => {
+    // Carga inicial
     carregarHandoffs();
-    const id = setInterval(() => { carregarHandoffs(); }, 8000);
-    return () => clearInterval(id);
-  }, []);
+
+    const es = new EventSource(`${API}/api/handoff/stream`);
+
+    // Qualquer evento (novo, assumido, resolvido) recarrega a lista completa.
+    // A lista é pequena (só PENDENTE + EM_ANDAMENTO), então um fetch completo
+    // é mais simples e seguro do que aplicar diffs parciais no estado.
+    const onEvento = () => carregarHandoffs();
+
+    es.addEventListener("novo", onEvento);
+    es.addEventListener("assumido", onEvento);
+    es.addEventListener("resolvido", onEvento);
+
+    es.onerror = () => {
+      // Reconexão automática do EventSource em ~3s (comportamento nativo do browser)
+      console.warn("[SSE] Conexão perdida, reconectando...");
+    };
+
+    return () => {
+      es.removeEventListener("novo", onEvento);
+      es.removeEventListener("assumido", onEvento);
+      es.removeEventListener("resolvido", onEvento);
+      es.close();
+    };
+  }, [carregarHandoffs]);
+
   useEffect(() => { if (aba === "admin") carregarMetricas(); }, [aba, carregarMetricas]);
 
   const validarCodigo = (v: string) => {
+    // Só permite alterar o código se não estiver em atendimento ativo
+    if (atendimentoAtivo) return;
     const limpo = v.replace(/\D/g, "").slice(0, 3);
     setVendedorCodigo(limpo);
     setCodigoErro(limpo.length > 0 && limpo.length < 3 ? "Codigo deve ter 3 digitos" : "");
   };
 
   const assumir = async (id: string) => {
-    if (vendedorCodigo.length !== 3) { setCodigoErro("Informe seu codigo de 3 digitos antes de assumir"); return; }
-    await fetch(`${API}/api/handoff/${id}/assumir`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendedorId: vendedorCodigo }) });
-    carregarHandoffs();
+    if (vendedorCodigo.length !== 3) {
+      setCodigoErro("Informe seu codigo de 3 digitos antes de assumir");
+      return;
+    }
+
+    try {
+      const r = await fetch(`${API}/api/handoff/${id}/assumir`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendedorId: vendedorCodigo }),
+      });
+
+      if (r.status === 409) {
+        // Outro vendedor assumiu primeiro — corrida perdida
+        setToast({ mensagem: "Este atendimento já foi assumido por outro vendedor.", tipo: "erro" });
+        carregarHandoffs(); // Atualiza a lista para refletir o novo estado
+        return;
+      }
+
+      if (!r.ok) {
+        setToast({ mensagem: "Erro ao assumir atendimento. Tente novamente.", tipo: "erro" });
+        return;
+      }
+
+      // Sucesso — bloqueia o input de código e marca o atendimento ativo
+      setAtendimentoAtivo(id);
+      setSelecionado(id);
+      carregarHandoffs();
+    } catch {
+      setToast({ mensagem: "Erro de conexão. Verifique a API.", tipo: "erro" });
+    }
   };
 
   const resolver = async (id: string) => {
     await fetch(`${API}/api/handoff/${id}/resolver`, { method: "POST" });
-    setSelecionado(null); carregarHandoffs();
+    // Libera o bloqueio — vendedor pode assumir novo atendimento
+    setAtendimentoAtivo(null);
+    setSelecionado(null);
+    carregarHandoffs();
   };
 
   const enviarMensagem = async () => {
     if (!selecionado || !mensagem.trim() || vendedorCodigo.length !== 3) return;
-    await fetch(`${API}/api/handoff/${selecionado}/mensagem`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto: mensagem, vendedorId: vendedorCodigo }) });
+    await fetch(`${API}/api/handoff/${selecionado}/mensagem`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto: mensagem, vendedorId: vendedorCodigo }),
+    });
     setMensagem("");
     carregarHandoffs();
   };
@@ -173,16 +274,22 @@ export default function Dashboard() {
   const contexto = selecionadoObj?.conversa?.contexto;
   const nomeCliente = selecionadoObj?.conversa?.cliente?.nome ?? selecionadoObj?.conversa?.cliente?.telefone ?? "Cliente";
 
-  const corOrigem: Record<string, string> = { IA: "#2563eb", CLIENTE: "#16a34a", HUMANO: "#7c3aed" };
-
   const botaoAba = (a: "operacional" | "admin", label: string) => (
     <button onClick={() => setAba(a)} style={{ padding: "8px 22px", borderRadius: 6, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13, background: aba === a ? "#3b82f6" : "transparent", color: aba === a ? "#fff" : "#94a3b8" }}>
       {label}
     </button>
   );
 
+  // Nome do cliente no atendimento ativo (para exibir no label do input bloqueado)
+  const clienteAtivo = atendimentoAtivo
+    ? handoffs.find((h) => h.id === atendimentoAtivo)?.conversa?.cliente
+    : null;
+  const nomeClienteAtivo = clienteAtivo?.nome ?? clienteAtivo?.telefone ?? "cliente";
+
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", minHeight: "100vh", background: "#f3f4f6" }}>
+      {toast && <Toast mensagem={toast.mensagem} tipo={toast.tipo} onClose={() => setToast(null)} />}
+
       <header style={{ background: "#1e293b", color: "#fff", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>AutoPecas — Painel</h1>
@@ -206,13 +313,45 @@ export default function Dashboard() {
             <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 20px", fontSize: 13 }}>
               <span style={{ color: "#6b7280" }}>Total </span><strong>{handoffs.length}</strong>
             </div>
+
+            {/* ── INPUT DE CÓDIGO — bloqueia durante atendimento ativo ── */}
             <div style={{ marginLeft: "auto" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <label style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>Seu codigo (3 digitos)</label>
-                <input type="text" value={vendedorCodigo} onChange={(e) => validarCodigo(e.target.value)} maxLength={3} placeholder="000"
-                  style={{ width: 60, padding: "6px 10px", borderRadius: 6, border: `1.5px solid ${codigoErro ? "#dc2626" : "#d1d5db"}`, fontSize: 18, fontWeight: 700, textAlign: "center" }} />
+                <label style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>
+                  {atendimentoAtivo ? "Em atendimento" : "Seu codigo (3 digitos)"}
+                </label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    value={vendedorCodigo}
+                    onChange={(e) => validarCodigo(e.target.value)}
+                    maxLength={3}
+                    placeholder="000"
+                    disabled={!!atendimentoAtivo}
+                    style={{
+                      width: 60,
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      border: `1.5px solid ${codigoErro ? "#dc2626" : atendimentoAtivo ? "#d97706" : "#d1d5db"}`,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      textAlign: "center",
+                      background: atendimentoAtivo ? "#fef3c7" : "#fff",
+                      color: atendimentoAtivo ? "#92400e" : "#111827",
+                      cursor: atendimentoAtivo ? "not-allowed" : "text",
+                      opacity: 1,
+                    }}
+                  />
+                </div>
               </div>
-              {codigoErro && <p style={{ fontSize: 11, color: "#dc2626", margin: "4px 0 0 0" }}>{codigoErro}</p>}
+              {codigoErro && !atendimentoAtivo && (
+                <p style={{ fontSize: 11, color: "#dc2626", margin: "4px 0 0 0" }}>{codigoErro}</p>
+              )}
+              {atendimentoAtivo && (
+                <p style={{ fontSize: 11, color: "#d97706", margin: "4px 0 0 0", fontWeight: 600 }}>
+                  Atendendo {nomeClienteAtivo} — resolva para liberar
+                </p>
+              )}
             </div>
           </div>
 
@@ -222,12 +361,23 @@ export default function Dashboard() {
               {handoffs.map((h) => {
                 const cliente = h.conversa?.cliente;
                 const ctx = h.conversa?.contexto;
+                // Botão Assumir desabilitado se este vendedor já tem atendimento ativo
+                const podeAssumir = h.status === "PENDENTE" && !atendimentoAtivo;
+                const esteEstaAtivo = h.id === atendimentoAtivo;
+
                 return (
                   <div key={h.id} onClick={() => setSelecionado(h.id === selecionado ? null : h.id)}
-                    style={{ background: selecionado === h.id ? "#eff6ff" : "#fff", border: `1.5px solid ${selecionado === h.id ? "#3b82f6" : "#e5e7eb"}`, borderRadius: 10, padding: 16, marginBottom: 10, cursor: "pointer" }}>
+                    style={{
+                      background: esteEstaAtivo ? "#f0fdf4" : selecionado === h.id ? "#eff6ff" : "#fff",
+                      border: `1.5px solid ${esteEstaAtivo ? "#16a34a" : selecionado === h.id ? "#3b82f6" : "#e5e7eb"}`,
+                      borderRadius: 10, padding: 16, marginBottom: 10, cursor: "pointer",
+                    }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{cliente?.nome ?? cliente?.telefone ?? "Cliente"}</p>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
+                          {cliente?.nome ?? cliente?.telefone ?? "Cliente"}
+                          {esteEstaAtivo && <span style={{ marginLeft: 8, fontSize: 11, color: "#16a34a", fontWeight: 600 }}>● seu atendimento</span>}
+                        </p>
                         {ctx?.veiculo && <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "#6b7280" }}>{ctx.veiculo} | {ctx.tipoEntrega} | {ctx.pagamento}</p>}
                         {ctx?.carrinho && ctx.carrinho.length > 0 && (
                           <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "#374151" }}>
@@ -242,16 +392,34 @@ export default function Dashboard() {
                     </div>
                     <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                       {h.status === "PENDENTE" && (
-                        <button onClick={(e) => { e.stopPropagation(); assumir(h.id); }}
-                          style={{ padding: "6px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); assumir(h.id); }}
+                          disabled={!podeAssumir}
+                          title={atendimentoAtivo && !esteEstaAtivo ? "Você já está em um atendimento" : ""}
+                          style={{
+                            padding: "6px 14px",
+                            background: podeAssumir ? "#2563eb" : "#9ca3af",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: 6,
+                            cursor: podeAssumir ? "pointer" : "not-allowed",
+                            fontSize: 12,
+                            fontWeight: 600,
+                          }}>
                           Assumir
                         </button>
                       )}
-                      {h.status === "EM_ANDAMENTO" && (
-                        <button onClick={(e) => { e.stopPropagation(); resolver(h.id); }}
+                      {h.status === "EM_ANDAMENTO" && esteEstaAtivo && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); resolver(h.id); }}
                           style={{ padding: "6px 14px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
                           Resolver
                         </button>
+                      )}
+                      {h.status === "EM_ANDAMENTO" && !esteEstaAtivo && (
+                        <span style={{ fontSize: 12, color: "#6b7280", padding: "6px 0" }}>
+                          Vendedor {h.vendedorId}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -295,8 +463,14 @@ export default function Dashboard() {
                 </div>
 
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input type="text" value={mensagem} onChange={(e) => setMensagem(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagem()} placeholder="Digite a resposta..."
-                    style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1.5px solid #d1d5db", fontSize: 13 }} />
+                  <input
+                    type="text"
+                    value={mensagem}
+                    onChange={(e) => setMensagem(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && enviarMensagem()}
+                    placeholder="Digite a resposta..."
+                    style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1.5px solid #d1d5db", fontSize: 13 }}
+                  />
                   <button onClick={enviarMensagem}
                     style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
                     Enviar
