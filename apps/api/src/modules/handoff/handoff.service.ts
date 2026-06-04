@@ -1,4 +1,4 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+﻿import { Injectable, ConflictException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Subject } from 'rxjs';
@@ -25,7 +25,7 @@ export interface HandoffSseEvent {
 
 @Injectable()
 export class HandoffService {
-  // Subject RxJS — cada conexão SSE do dashboard recebe os eventos
+  // Subject RxJS â€” cada conexÃ£o SSE do dashboard recebe os eventos
   private readonly sseStream$ = new Subject<HandoffSseEvent>();
 
   constructor(
@@ -33,19 +33,19 @@ export class HandoffService {
     private prisma: PrismaService,
   ) {}
 
-  /** Retorna o Observable que o controller expõe via @Sse() */
+  /** Retorna o Observable que o controller expÃµe via @Sse() */
   getSseStream() {
     return this.sseStream$.asObservable();
   }
 
   async criarHandoff(payload: HandoffPayload) {
-    // Verifica se já existe handoff pendente para essa conversa
+    // Verifica se jÃ¡ existe handoff pendente para essa conversa
     const existente = await this.prisma.atendimento.findUnique({
       where: { conversaId: payload.conversaId },
     });
 
     if (existente && existente.status === 'PENDENTE') {
-      console.log(`[Handoff] Já existe handoff pendente para conversa ${payload.conversaId}`);
+      console.log(`[Handoff] JÃ¡ existe handoff pendente para conversa ${payload.conversaId}`);
       return existente;
     }
 
@@ -72,7 +72,7 @@ export class HandoffService {
       },
     );
 
-    // Job de SLA — dispara se não for atendido no prazo
+    // Job de SLA â€” dispara se nÃ£o for atendido no prazo
     await this.handoffQueue.add(
       'verificar-sla',
       { atendimentoId: atendimento.id, conversaId: payload.conversaId },
@@ -83,7 +83,7 @@ export class HandoffService {
       },
     );
 
-    console.log(`[Handoff] Criado atendimento ${atendimento.id} — prioridade: ${payload.prioridade}`);
+    console.log(`[Handoff] Criado atendimento ${atendimento.id} â€” prioridade: ${payload.prioridade}`);
 
     // Notifica todos os dashboards conectados via SSE
     this.sseStream$.next({ tipo: 'novo', atendimentoId: atendimento.id });
@@ -92,8 +92,8 @@ export class HandoffService {
   }
 
   async assumirAtendimento(atendimentoId: string, vendedorId: string) {
-    // ── LOCK OTIMISTA ────────────────────────────────────────────────────
-    // O updateMany só atualiza se o status ainda for PENDENTE.
+    // â”€â”€ LOCK OTIMISTA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // O updateMany sÃ³ atualiza se o status ainda for PENDENTE.
     // Se outro vendedor assumiu primeiro, count === 0 e retornamos 409.
     const resultado = await this.prisma.atendimento.updateMany({
       where: { id: atendimentoId, status: 'PENDENTE' },
@@ -105,8 +105,8 @@ export class HandoffService {
     });
 
     if (resultado.count === 0) {
-      // Nenhum registro atualizado — já foi assumido por outro vendedor
-      throw new ConflictException('Atendimento já foi assumido por outro vendedor');
+      // Nenhum registro atualizado â€” jÃ¡ foi assumido por outro vendedor
+      throw new ConflictException('Atendimento jÃ¡ foi assumido por outro vendedor');
     }
 
     // Busca o atendimento atualizado para retornar ao frontend
@@ -116,19 +116,19 @@ export class HandoffService {
     });
 
     await this.prisma.conversa.update({
-      where: { id: atendimento.conversaId },
+      where: { id: atendimento!.conversaId },
       data: { status: 'EM_ATENDIMENTO' },
     });
 
     await this.prisma.logConversa.create({
       data: {
-        conversaId: atendimento.conversaId,
+        conversaId: atendimento!.conversaId,
         tipo: 'HANDOFF_ASSUMIDO',
         payload: { vendedorId, atendimentoId },
       },
     });
 
-    // Notifica todos os dashboards — este atendimento saiu da fila
+    // Notifica todos os dashboards â€” este atendimento saiu da fila
     this.sseStream$.next({ tipo: 'assumido', atendimentoId });
 
     return atendimento;
@@ -144,7 +144,7 @@ export class HandoffService {
     });
 
     await this.prisma.conversa.update({
-      where: { id: atendimento.conversaId },
+      where: { id: atendimento!.conversaId },
       data: {
         status: 'FINALIZADA',
         estadoAtual: 'FINALIZADO',
@@ -174,8 +174,8 @@ export class HandoffService {
 
   private montarResumo(payload: HandoffPayload): string {
     const linhas = [`Cliente: ${payload.telefone}`];
-    if (payload.peca) linhas.push(`Peça: ${payload.peca}`);
-    if (payload.veiculo) linhas.push(`Veículo: ${payload.veiculo}`);
+    if (payload.peca) linhas.push(`PeÃ§a: ${payload.peca}`);
+    if (payload.veiculo) linhas.push(`VeÃ­culo: ${payload.veiculo}`);
     if (payload.pagamento) linhas.push(`Pagamento: ${payload.pagamento}`);
     if (payload.entrega) linhas.push(`Entrega: ${payload.entrega}`);
     return linhas.join(' | ');
@@ -187,3 +187,4 @@ export class HandoffService {
     return 'BAIXA';
   }
 }
+
