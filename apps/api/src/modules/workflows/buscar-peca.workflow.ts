@@ -50,7 +50,7 @@ export class BuscarPecaWorkflow implements OnModuleInit {
 
       await prisma.conversa.update({
         where: { id: ctx.conversaId },
-        data: { contexto: { ...contexto, pecaPendente: pecaFinal } },
+        data: { contexto: { ...contexto, pecaPendente: pecaFinal, veiculo: veiculoFinal, ano: anoFinal } },
       });
 
       return {
@@ -94,6 +94,18 @@ export class BuscarPecaWorkflow implements OnModuleInit {
         resposta: `Encontrei! *${p.nome}* (${p.marca}) para ${p.aplicacao}.\nPreco: *R$ ${p.preco.toFixed(2)}* | ${p.estoque} em estoque.${outros}\n\n? Item adicionado!\n\nPosso ajudar com mais alguma peca ou acessorio?`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['PECA_ENCONTRADA'],
+        handoff: { necessario: false },
+      };
+    }
+
+    // Busca sem filtro de ano para ver se existe para outro ano
+    const produtosSemAno = await this.inventory.buscarPeca(pecaFinal, veiculoFinal);
+    if (produtosSemAno.length > 0) {
+      const aplicacoes = [...new Set(produtosSemAno.map(p => p.aplicacao))].join(', ');
+      return {
+        resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal}.\n\nTemos esse produto para: ${aplicacoes}.\n\nVerifique o ano do seu veiculo ou entre em contato com um vendedor.`,
+        novoEstado: 'AGUARDANDO_MAIS_ITENS',
+        acoes: ['ANO_INCOMPATIVEL'],
         handoff: { necessario: false },
       };
     }
