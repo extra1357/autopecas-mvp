@@ -18,6 +18,12 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     this.engine.registrar(this);
   }
 
+  private disponibilidade(estoque: number): string {
+    if (estoque >= 10) return '? Disponivel';
+    if (estoque >= 3) return '?? Ultimas unidades';
+    return '?? Estoque baixo';
+  }
+
   async executar(ctx: WorkflowContext, prisma: PrismaService): Promise<WorkflowResult> {
     const { peca, veiculo, ano } = ctx.entidades;
 
@@ -91,14 +97,13 @@ export class BuscarPecaWorkflow implements OnModuleInit {
       });
 
       return {
-        resposta: `Encontrei! *${p.nome}* (${p.marca}) para ${p.aplicacao}.\nPreco: *R$ ${p.preco.toFixed(2)}* | ${p.estoque} em estoque.${outros}\n\n? Item adicionado!\n\nPosso ajudar com mais alguma peca ou acessorio?`,
+        resposta: `Encontrei! *${p.nome}* (${p.marca}) para ${p.aplicacao}.\nPreco: *R$ ${p.preco.toFixed(2)}* | ${this.disponibilidade(p.estoque)}.${outros}\n\n? Item adicionado!\n\nPosso ajudar com mais alguma peca ou acessorio?`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['PECA_ENCONTRADA'],
         handoff: { necessario: false },
       };
     }
 
-    // Busca sem filtro de ano para ver se existe para outro ano
     const produtosSemAno = await this.inventory.buscarPeca(pecaFinal, veiculoFinal);
     if (produtosSemAno.length > 0) {
       const aplicacoes = [...new Set(produtosSemAno.map(p => p.aplicacao))].join(', ');
