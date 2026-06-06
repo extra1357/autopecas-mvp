@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { WorkflowEngine, WorkflowContext, WorkflowResult } from './workflow.engine';
@@ -21,7 +21,6 @@ export class BuscarPecaWorkflow implements OnModuleInit {
   async executar(ctx: WorkflowContext, prisma: PrismaService): Promise<WorkflowResult> {
     const { peca, veiculo, ano } = ctx.entidades;
 
-    // Busca contexto atualizado do banco
     const conversaAtual = await prisma.conversa.findUnique({
       where: { id: ctx.conversaId },
       select: { contexto: true },
@@ -29,7 +28,11 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     const contexto = (conversaAtual?.contexto as Record<string, any>) || ctx.contexto;
     const carrinho: any[] = contexto.carrinho || [];
 
-    if (!peca) {
+    const veiculoFinal = veiculo || contexto.veiculo;
+    const anoFinal = ano || contexto.ano;
+    const pecaFinal = peca || contexto.pecaPendente;
+
+    if (!pecaFinal) {
       return {
         resposta: 'Qual peca voce precisa? Ex: amortecedor, pastilha de freio, filtro de oleo...',
         novoEstado: 'AGUARDANDO_PECA',
@@ -38,8 +41,28 @@ export class BuscarPecaWorkflow implements OnModuleInit {
       };
     }
 
-    this.logger.log(`Buscando: ${peca} | ${veiculo} | ${ano}`);
-    const produtos = await this.inventory.buscarPeca(peca, veiculo, ano);
+    if (!veiculoFinal || !anoFinal) {
+      const faltando = !veiculoFinal && !anoFinal
+        ? 'o modelo e o ano do veiculo'
+        : !veiculoFinal
+          ? 'o modelo do veiculo (ex: HB20, Gol, Corolla)'
+          : 'o ano do veiculo (ex: 2019, 2022)';
+
+      await prisma.conversa.update({
+        where: { id: ctx.conversaId },
+        data: { contexto: { ...contexto, pecaPendente: pecaFinal } },
+      });
+
+      return {
+        resposta: `Para buscar *${pecaFinal}* com precisao, preciso saber ${faltando}.\n\nPara qual veiculo e qual ano?`,
+        novoEstado: 'AGUARDANDO_VEICULO',
+        acoes: ['SOLICITOU_VEICULO_ANO'],
+        handoff: { necessario: false },
+      };
+    }
+
+    this.logger.log(`Buscando: ${pecaFinal} | ${veiculoFinal} | ${anoFinal}`);
+    const produtos = await this.inventory.buscarPeca(pecaFinal, veiculoFinal, anoFinal);
 
     if (produtos.length > 0) {
       const p = produtos[0];
@@ -56,22 +79,30 @@ export class BuscarPecaWorkflow implements OnModuleInit {
 
       await prisma.conversa.update({
         where: { id: ctx.conversaId },
-        data: { contexto: { ...contexto, carrinho, veiculo, ano } },
+        data: {
+          contexto: {
+            ...contexto,
+            carrinho,
+            veiculo: veiculoFinal,
+            ano: anoFinal,
+            pecaPendente: null,
+          },
+        },
       });
 
       return {
-        resposta: `Encontrei! *${p.nome}* (${p.marca}) para ${p.aplicacao}.\nPreco: *R$ ${p.preco.toFixed(2)}* | ${p.estoque} em estoque.${outros}\n\n✅ Item adicionado!\n\nPosso ajudar com mais alguma peca ou acessorio?`,
+        resposta: `Encontrei! *${p.nome}* (${p.marca}) para ${p.aplicacao}.\nPreco: *R$ ${p.preco.toFixed(2)}* | ${p.estoque} em estoque.${outros}\n\n? Item adicionado!\n\nPosso ajudar com mais alguma peca ou acessorio?`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['PECA_ENCONTRADA'],
         handoff: { necessario: false },
       };
     }
 
-    const similares = await this.inventory.buscarSimilares(peca);
+    const similares = await this.inventory.buscarSimilares(pecaFinal);
     if (similares.length > 0) {
       const nomes = similares.map(s => `- ${s.nome} para ${s.aplicacao} | R$ ${s.preco.toFixed(2)}`).join('\n');
       return {
-        resposta: `Nao encontrei *${peca}* para ${veiculo || 'esse veiculo'} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve? Ou posso buscar outra peca para voce.`,
+        resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve? Ou posso buscar outra peca para voce.`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['SIMILAR_ENCONTRADO'],
         handoff: { necessario: false },
@@ -79,7 +110,7 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     }
 
     return {
-      resposta: `Nao encontrei *${peca}* no nosso estoque no momento.\n\nPosso buscar outra peca para voce, ou se preferir, podemos finalizar o pedido com os itens ja selecionados.`,
+      resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} no nosso estoque.\n\nPosso buscar outra peca, ou finalizamos o pedido com os itens ja selecionados?`,
       novoEstado: 'AGUARDANDO_MAIS_ITENS',
       acoes: ['PECA_NAO_ENCONTRADA'],
       handoff: { necessario: false },
