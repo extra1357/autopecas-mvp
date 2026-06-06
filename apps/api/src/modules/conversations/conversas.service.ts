@@ -56,14 +56,14 @@ export class ConversasService {
       data: { conversaId: conversa.id, origem: 'CLIENTE', conteudo: mensagem },
     });
 
-    // BLOQUEIO: vendedor ja assumiu
     if (conversa.status === 'AGUARDANDO_HUMANO' || conversa.status === 'EM_ATENDIMENTO') {
       this.logger.warn(`[Conversas] Mensagem de ${telefone} ignorada — conversa=${conversa.id} status=${conversa.status}`);
       return '';
     }
 
-    // COLETA DE NOME
     const contextoAtual = (conversa.contexto as Record<string, any>) || {};
+
+    // COLETA DE NOME
     if (!cliente.nome && !contextoAtual.aguardandoNome && conversa.estadoAtual === 'INICIO') {
       await this.prisma.conversa.update({
         where: { id: conversa.id },
@@ -81,11 +81,55 @@ export class ConversasService {
       await this.prisma.cliente.update({ where: { id: cliente.id }, data: { nome: mensagem.trim() } });
       await this.prisma.conversa.update({
         where: { id: conversa.id },
-        data: { contexto: { ...contextoAtual, aguardandoNome: false } },
+        data: { contexto: { ...contextoAtual, aguardandoNome: false, aguardandoConsentimento: true } },
       });
       cliente = { ...cliente, nome: mensagem.trim() };
       this.logger.log(`[Conversas] Nome coletado: "${mensagem.trim()}" para cliente=${cliente.id}`);
-      const resposta = `Prazer, ${nome}! 👋\n\nQual peca voce esta procurando? Me informe tambem o modelo e ano do veiculo.`;
+      const resposta = `Prazer, ${nome}! 👋\n\nPosso te enviar promoções, ofertas e novidades por WhatsApp? Responda *sim* ou *não*. Você pode cancelar quando quiser. 😊`;
+      await this.prisma.mensagem.create({
+        data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
+      });
+      return resposta;
+    }
+
+    // COLETA DE CONSENTIMENTO LGPD
+    if (contextoAtual.aguardandoConsentimento && cliente.aceitaMarketing === null) {
+      const respostaNormalizada = mensagem.toLowerCase().trim();
+      const aceitou = ['sim', 's', 'yes', '1', 'quero', 'pode'].includes(respostaNormalizada);
+      const recusou = ['nao', 'não', 'n', 'no', '0', 'nope'].includes(respostaNormalizada);
+
+      if (!aceitou && !recusou) {
+        const resposta = `Por favor, responda *sim* ou *não*. Posso te enviar promoções e novidades por WhatsApp?`;
+        await this.prisma.mensagem.create({
+          data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
+        });
+        return resposta;
+      }
+
+      const dataAgora = new Date();
+      const dataFormatada = dataAgora.toLocaleDateString('pt-BR');
+
+      await this.prisma.cliente.update({
+        where: { id: cliente.id },
+        data: {
+          aceitaMarketing: aceitou,
+          consentimentoEm: dataAgora,
+          consentimentoOrigem: `WhatsApp - primeiro contato em ${dataFormatada}`,
+        },
+      });
+
+      await this.prisma.conversa.update({
+        where: { id: conversa.id },
+        data: { contexto: { ...contextoAtual, aguardandoConsentimento: false } },
+      });
+
+      this.logger.log(`[Conversas] Consentimento LGPD: ${aceitou ? 'ACEITO' : 'RECUSADO'} | cliente=${cliente.id}`);
+
+      const nome = cliente.nome?.split(' ')[0] ?? '';
+      const resposta = aceitou
+        ? `Ótimo, ${nome}! Você receberá nossas melhores ofertas. 🎉\n\nAgora, qual peça você está procurando? Me informe também o modelo e ano do veículo.`
+        : `Sem problema, ${nome}! Você não receberá mensagens de marketing.\n\nQual peça você está procurando? Me informe também o modelo e ano do veículo.`;
+
       await this.prisma.mensagem.create({
         data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
       });
