@@ -19,9 +19,9 @@ export class BuscarPecaWorkflow implements OnModuleInit {
   }
 
   private disponibilidade(estoque: number): string {
-    if (estoque >= 10) return '? Disponivel';
-    if (estoque >= 3) return '?? Ultimas unidades';
-    return '?? Estoque baixo';
+    if (estoque >= 10) return 'Disponivel';
+    if (estoque >= 3) return 'Ultimas unidades';
+    return 'Estoque baixo';
   }
 
   async executar(ctx: WorkflowContext, prisma: PrismaService): Promise<WorkflowResult> {
@@ -34,8 +34,10 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     const contexto = (conversaAtual?.contexto as Record<string, any>) || ctx.contexto;
     const carrinho: any[] = contexto.carrinho || [];
 
-    const veiculoFinal = veiculo || contexto.veiculo;
-    const anoFinal = ano || contexto.ano;
+    // Se o cliente informou um veiculo novo, atualiza o contexto
+    // Se nao informou, usa o que ja estava salvo
+    const veiculoFinal = veiculo || contexto.veiculoAtual;
+    const anoFinal = ano || contexto.anoAtual;
     const pecaFinal = peca || contexto.pecaPendente;
 
     if (!pecaFinal) {
@@ -56,7 +58,7 @@ export class BuscarPecaWorkflow implements OnModuleInit {
 
       await prisma.conversa.update({
         where: { id: ctx.conversaId },
-        data: { contexto: { ...contexto, pecaPendente: pecaFinal, veiculo: veiculoFinal, ano: anoFinal } },
+        data: { contexto: { ...contexto, pecaPendente: pecaFinal } },
       });
 
       return {
@@ -66,6 +68,14 @@ export class BuscarPecaWorkflow implements OnModuleInit {
         handoff: { necessario: false },
       };
     }
+
+    // Atualiza o veiculo atual no contexto (pode ter mudado)
+    const novoContextoBase = {
+      ...contexto,
+      veiculoAtual: veiculoFinal,
+      anoAtual: anoFinal,
+      pecaPendente: null,
+    };
 
     this.logger.log(`Buscando: ${pecaFinal} | ${veiculoFinal} | ${anoFinal}`);
     const produtos = await this.inventory.buscarPeca(pecaFinal, veiculoFinal, anoFinal);
@@ -79,21 +89,15 @@ export class BuscarPecaWorkflow implements OnModuleInit {
         nome: p.nome,
         marca: p.marca,
         aplicacao: p.aplicacao,
+        veiculo: veiculoFinal,
+        ano: anoFinal,
         preco: p.preco,
         quantidade: 1,
       });
 
       await prisma.conversa.update({
         where: { id: ctx.conversaId },
-        data: {
-          contexto: {
-            ...contexto,
-            carrinho,
-            veiculo: veiculoFinal,
-            ano: anoFinal,
-            pecaPendente: null,
-          },
-        },
+        data: { contexto: { ...novoContextoBase, carrinho } },
       });
 
       return {
@@ -107,6 +111,10 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     const produtosSemAno = await this.inventory.buscarPeca(pecaFinal, veiculoFinal);
     if (produtosSemAno.length > 0) {
       const aplicacoes = [...new Set(produtosSemAno.map(p => p.aplicacao))].join(', ');
+      await prisma.conversa.update({
+        where: { id: ctx.conversaId },
+        data: { contexto: novoContextoBase },
+      });
       return {
         resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal}.\n\nTemos esse produto para: ${aplicacoes}.\n\nVerifique o ano do seu veiculo ou entre em contato com um vendedor.`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
@@ -118,6 +126,10 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     const similares = await this.inventory.buscarSimilares(pecaFinal);
     if (similares.length > 0) {
       const nomes = similares.map(s => `- ${s.nome} para ${s.aplicacao} | R$ ${s.preco.toFixed(2)}`).join('\n');
+      await prisma.conversa.update({
+        where: { id: ctx.conversaId },
+        data: { contexto: novoContextoBase },
+      });
       return {
         resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve? Ou posso buscar outra peca para voce.`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
@@ -125,6 +137,11 @@ export class BuscarPecaWorkflow implements OnModuleInit {
         handoff: { necessario: false },
       };
     }
+
+    await prisma.conversa.update({
+      where: { id: ctx.conversaId },
+      data: { contexto: novoContextoBase },
+    });
 
     return {
       resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} no nosso estoque.\n\nPosso buscar outra peca, ou finalizamos o pedido com os itens ja selecionados?`,
