@@ -1,5 +1,6 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RagService } from '../rag/rag.service';
 
 export interface WorkflowContext {
   conversaId: string;
@@ -17,6 +18,7 @@ export interface WorkflowContext {
   };
   estadoAtual: string;
   contexto: Record<string, any>;
+  mensagemOriginal?: string;
 }
 
 export interface WorkflowResult {
@@ -41,12 +43,15 @@ export class WorkflowEngine {
   private readonly logger = new Logger(WorkflowEngine.name);
   private workflows: Map<string, Workflow> = new Map();
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private ragService: RagService,
+  ) {}
 
   registrar(workflow: Workflow) {
     for (const intent of workflow.intents) {
       this.workflows.set(intent, workflow);
-      this.logger.log(`Workflow registrado: ${workflow.nome} → intent: ${intent}`);
+      this.logger.log(`Workflow registrado: ${workflow.nome} ? intent: ${intent}`);
     }
   }
 
@@ -55,6 +60,35 @@ export class WorkflowEngine {
 
     if (!workflow) {
       this.logger.warn(`Nenhum workflow para intent: ${ctx.intent}`);
+
+      const pergunta = ctx.mensagemOriginal || ctx.intent;
+      const respostaRag = await this.ragService.buscarConhecimento(pergunta);
+
+      if (respostaRag) {
+        this.logger.log(`RAG respondeu para: "${pergunta}"`);
+        await this.prisma.logConversa.create({
+          data: {
+            conversaId: ctx.conversaId,
+            tipo: 'RAG_RESPONDEU',
+            payload: { pergunta, intent: ctx.intent },
+          },
+        });
+        return {
+          resposta: respostaRag,
+          novoEstado: ctx.estadoAtual,
+          acoes: ['RAG_RESPONDEU'],
+          handoff: { necessario: false },
+        };
+      }
+
+      await this.prisma.logConversa.create({
+        data: {
+          conversaId: ctx.conversaId,
+          tipo: 'SEM_RESPOSTA',
+          payload: { pergunta, intent: ctx.intent },
+        },
+      });
+
       return {
         resposta: 'Entendi! Pode me dar mais detalhes sobre o que voce precisa?',
         novoEstado: ctx.estadoAtual,
@@ -68,7 +102,6 @@ export class WorkflowEngine {
     try {
       const result = await workflow.executar(ctx, this.prisma);
 
-      // Busca contexto atual do banco para nao sobrescrever carrinho
       const conversaAtual = await this.prisma.conversa.findUnique({
         where: { id: ctx.conversaId },
         select: { contexto: true },

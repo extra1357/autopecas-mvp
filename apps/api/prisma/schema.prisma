@@ -222,3 +222,16 @@ model LogConversa {
 
   @@map("logs_conversa")
 }
+// -------------------------------------------
+// BASE DE CONHECIMENTO (RAG - FAQ)
+// -------------------------------------------
+model BaseConhecimento {
+  id         String   @id @default(uuid())
+  titulo     String
+  conteudo   String
+  tags       String[]
+  relevancia Int      @default(1)
+  criadoEm  DateTime @default(now())
+
+  @@map("base_conhecimento")
+}

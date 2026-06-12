@@ -34,8 +34,6 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     const contexto = (conversaAtual?.contexto as Record<string, any>) || ctx.contexto;
     const carrinho: any[] = contexto.carrinho || [];
 
-    // Se o cliente informou um veiculo novo, atualiza o contexto
-    // Se nao informou, usa o que ja estava salvo
     const veiculoFinal = veiculo || contexto.veiculoAtual;
     const anoFinal = ano || contexto.anoAtual;
     const pecaFinal = peca || contexto.pecaPendente;
@@ -69,7 +67,6 @@ export class BuscarPecaWorkflow implements OnModuleInit {
       };
     }
 
-    // Atualiza o veiculo atual no contexto (pode ter mudado)
     const novoContextoBase = {
       ...contexto,
       veiculoAtual: veiculoFinal,
@@ -131,9 +128,24 @@ export class BuscarPecaWorkflow implements OnModuleInit {
         data: { contexto: novoContextoBase },
       });
       return {
-        resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve? Ou posso buscar outra peca para voce.`,
+        resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve?`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['SIMILAR_ENCONTRADO'],
+        handoff: { necessario: false },
+      };
+    }
+
+    const semanticos = await this.inventory.buscarPecaSemantica(pecaFinal, veiculoFinal);
+    if (semanticos.length > 0) {
+      const nomes = semanticos.map(s => `- ${s.nome} para ${s.aplicacao} | R$ ${s.preco.toFixed(2)}`).join('\n');
+      await prisma.conversa.update({
+        where: { id: ctx.conversaId },
+        data: { contexto: novoContextoBase },
+      });
+      return {
+        resposta: `Nao encontrei exatamente *${pecaFinal}*, mas esses produtos podem ser o que voce precisa:\n${nomes}\n\nAlgum desses serve?`,
+        novoEstado: 'AGUARDANDO_MAIS_ITENS',
+        acoes: ['SEMANTICO_ENCONTRADO'],
         handoff: { necessario: false },
       };
     }
