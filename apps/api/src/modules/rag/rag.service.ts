@@ -195,7 +195,14 @@ Responda de forma direta e amigavel, em ate 2 linhas, usando as informacoes acim
     if (!perguntaDoc) throw new Error("Pergunta nao encontrada");
 
     const texto = `Pergunta: ${perguntaDoc.pergunta}\nResposta: ${resposta}`;
-    const embedding = await this.gerarEmbedding(perguntaDoc.pergunta);
+    this.logger.log(`[marcarResolvida] Gerando embedding para: "${perguntaDoc.pergunta}"`);
+    let embedding: number[];
+    try {
+      embedding = await this.gerarEmbedding(perguntaDoc.pergunta);
+    } catch (err) {
+      this.logger.error(`[marcarResolvida] ERRO embedding: ${err.message}`);
+      throw err;
+    }
     const embeddingStr = "[" + embedding.join(",") + "]";
 
     await this.prisma.$executeRaw`
