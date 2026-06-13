@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import Groq from 'groq-sdk';
 
 export interface IntencaoIA {
@@ -28,27 +28,28 @@ export class AiService {
 Analise a mensagem e retorne APENAS um JSON valido, sem texto adicional.
 
 Intents possiveis:
-- buscar_peca: cliente quer comprar ou verificar disponibilidade de peca
+- buscar_peca: cliente quer comprar ou verificar disponibilidade de UMA PECA ESPECIFICA. Exemplos: "tem amortecedor?", "preciso de filtro de oleo", "pastilha de freio para Civic"
 - querer_mais_itens: cliente quer adicionar mais pecas. Exemplos: "sim", "quero mais", "tenho outra peca", "adicionar", "mais uma"
 - finalizar_itens: cliente nao quer mais pecas. Exemplos: "nao", "so isso", "e tudo", "nao obrigado", "pode finalizar", "somente isso"
 - escolher_retirada: cliente quer retirar na loja. Exemplos: "retirada", "vou buscar", "pegar na loja", "retirar", "loja", "busco ai", "retiro"
 - escolher_entrega: cliente quer receber em casa. Exemplos: "delivery", "entrega", "entregar", "para entregar", "quero delivery", "receber", "receber em casa", "me manda"
-- informar_endereco: cliente fornece um endereco. QUALQUER mensagem que contenha rua, avenida, numero, bairro, cidade ou CEP deve ser classificada como informar_endereco. Exemplos: "Rua das Flores 123", "Av Paulista 1000 Bela Vista", "Rua Maranhao 255 Salto"
+- informar_endereco: cliente fornece um endereco. QUALQUER mensagem que contenha rua, avenida, numero, bairro, cidade ou CEP deve ser classificada como informar_endereco.
 - informar_pagamento: cliente informa forma de pagamento. Exemplos: "pix", "cartao", "dinheiro", "credito", "debito"
 - confirmar_pedido: cliente confirma o pedido. Exemplos: "sim", "confirmo", "esta correto", "pode ser", "tudo certo", "ok"
 - corrigir_pedido: cliente quer alterar algo. Exemplos: "nao", "quero mudar", "esta errado", "corrigir"
 - encerrar_conversa: cliente se despede ou agradece apos pedido. Exemplos: "obrigado", "tchau", "ate mais", "valeu", "ok obrigado"
 - falar_vendedor: cliente quer falar com humano
-- saudacao: oi, ola, bom dia, boa tarde, boa noite
-- desconhecido: nao se encaixa em nenhuma categoria
+- saudacao: APENAS cumprimentos simples sem pergunta. Exemplos: "oi", "ola", "bom dia", "boa tarde", "boa noite"
+- desconhecido: perguntas sobre a loja, politicas, horarios, pagamento, entrega, garantia, troca, parcelamento, ou qualquer coisa que nao seja uma acao de compra. Exemplos: "voces parcelam?", "qual o horario?", "fazem entrega para Itu?", "aceitam cheque?", "qual o prazo de troca?", "tem nota fiscal?"
 
 REGRAS CRITICAS:
-1. Se a mensagem contem qualquer tipo de logradouro (Rua, Av, Avenida, R., Al.) ou parece ser um endereco → informar_endereco. Extraia o endereco completo no campo endereco.
-2. Use o historico para entender o contexto atual da conversa.
-3. Se o bot perguntou "informe o endereco" e o cliente respondeu com qualquer texto que pareca endereco → informar_endereco.
-4. Se o bot perguntou "delivery ou retirada" → escolher_entrega ou escolher_retirada.
-5. Se o bot perguntou "mais alguma peca?" → querer_mais_itens ou finalizar_itens.
-6. Se o bot perguntou "esta tudo correto?" → confirmar_pedido ou corrigir_pedido.
+1. buscar_peca SOMENTE quando o cliente citar uma peca automotiva especifica. "parcelam em 12x" NAO e buscar_peca.
+2. Perguntas sobre politicas, horarios, formas de pagamento genericas, garantia ? SEMPRE desconhecido.
+3. Saudacao SOMENTE para cumprimentos puros, sem nenhuma pergunta junto.
+4. Se a mensagem contem logradouro (Rua, Av, Avenida, R., Al.) ? informar_endereco.
+5. Use o historico para entender o contexto atual da conversa.
+6. Se o bot perguntou "mais alguma peca?" ? querer_mais_itens ou finalizar_itens.
+7. Se o bot perguntou "esta tudo correto?" ? confirmar_pedido ou corrigir_pedido.
 
 Historico recente:
 ${historico || 'nenhum'}

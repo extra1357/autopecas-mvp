@@ -1,8 +1,9 @@
-Ôªøimport { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { WorkflowEngine } from '../workflows/workflow.engine';
 import { HandoffService } from '../handoff/handoff.service';
+import { RagService } from '../rag/rag.service';
 
 @Injectable()
 export class ConversasService {
@@ -13,6 +14,7 @@ export class ConversasService {
     private aiService: AiService,
     private workflowEngine: WorkflowEngine,
     private handoffService: HandoffService,
+    private ragService: RagService,
   ) {}
 
   async buscarOuCriarConversa(telefone: string) {
@@ -57,19 +59,18 @@ export class ConversasService {
     });
 
     if (conversa.status === 'AGUARDANDO_HUMANO' || conversa.status === 'EM_ATENDIMENTO') {
-      this.logger.warn(`[Conversas] Mensagem de ${telefone} ignorada ‚Äî conversa=${conversa.id} status=${conversa.status}`);
+      this.logger.warn(`[Conversas] Mensagem de ${telefone} ignorada ó conversa=${conversa.id} status=${conversa.status}`);
       return '';
     }
 
     const contextoAtual = (conversa.contexto as Record<string, any>) || {};
 
-    // COLETA DE NOME
     if (!cliente.nome && !contextoAtual.aguardandoNome && conversa.estadoAtual === 'INICIO') {
       await this.prisma.conversa.update({
         where: { id: conversa.id },
         data: { contexto: { ...contextoAtual, aguardandoNome: true } },
       });
-      const resposta = 'Ola! Bem-vindo a nossa loja de autopecas! üòä\n\nPrimeiro, pode me dizer seu nome?';
+      const resposta = 'Ola! Bem-vindo a nossa loja de autopecas! ??\n\nPrimeiro, pode me dizer seu nome?';
       await this.prisma.mensagem.create({
         data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
       });
@@ -85,21 +86,20 @@ export class ConversasService {
       });
       cliente = { ...cliente, nome: mensagem.trim() };
       this.logger.log(`[Conversas] Nome coletado: "${mensagem.trim()}" para cliente=${cliente.id}`);
-      const resposta = `Prazer, ${nome}! üëã\n\nPosso te enviar promo√ß√µes, ofertas e novidades por WhatsApp? Responda *sim* ou *n√£o*. Voc√™ pode cancelar quando quiser. üòä`;
+      const resposta = `Prazer, ${nome}! ??\n\nPosso te enviar promoÁıes, ofertas e novidades por WhatsApp? Responda *sim* ou *n„o*. VocÍ pode cancelar quando quiser. ??`;
       await this.prisma.mensagem.create({
         data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
       });
       return resposta;
     }
 
-    // COLETA DE CONSENTIMENTO LGPD
     if (contextoAtual.aguardandoConsentimento && cliente.aceitaMarketing === null) {
       const respostaNormalizada = mensagem.toLowerCase().trim();
       const aceitou = ['sim', 's', 'yes', '1', 'quero', 'pode'].includes(respostaNormalizada);
-      const recusou = ['nao', 'n√£o', 'n', 'no', '0', 'nope'].includes(respostaNormalizada);
+      const recusou = ['nao', 'n„o', 'n', 'no', '0', 'nope'].includes(respostaNormalizada);
 
       if (!aceitou && !recusou) {
-        const resposta = `Por favor, responda *sim* ou *n√£o*. Posso te enviar promo√ß√µes e novidades por WhatsApp?`;
+        const resposta = `Por favor, responda *sim* ou *n„o*. Posso te enviar promoÁıes e novidades por WhatsApp?`;
         await this.prisma.mensagem.create({
           data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
         });
@@ -127,8 +127,8 @@ export class ConversasService {
 
       const nome = cliente.nome?.split(' ')[0] ?? '';
       const resposta = aceitou
-        ? `√ìtimo, ${nome}! Voc√™ receber√° nossas melhores ofertas. üéâ\n\nAgora, qual pe√ßa voc√™ est√° procurando? Me informe tamb√©m o modelo e ano do ve√≠culo.`
-        : `Sem problema, ${nome}! Voc√™ n√£o receber√° mensagens de marketing.\n\nQual pe√ßa voc√™ est√° procurando? Me informe tamb√©m o modelo e ano do ve√≠culo.`;
+        ? `”timo, ${nome}! VocÍ receber· nossas melhores ofertas. ??\n\nAgora, qual peÁa vocÍ est· procurando? Me informe tambÈm o modelo e ano do veÌculo.`
+        : `Sem problema, ${nome}! VocÍ n„o receber· mensagens de marketing.\n\nQual peÁa vocÍ est· procurando? Me informe tambÈm o modelo e ano do veÌculo.`;
 
       await this.prisma.mensagem.create({
         data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
@@ -136,17 +136,16 @@ export class ConversasService {
       return resposta;
     }
 
-    // FLUXO NORMAL
     const historico = await this.buscarHistoricoTexto(conversa.id);
     let intencao: any;
     try {
       intencao = await this.aiService.classificarIntencao(mensagem, historico);
     } catch (error) {
-      this.logger.error(`[Conversas] ‚ùå Falha ao classificar inten√ß√£o | conversa=${conversa.id} | telefone=${telefone} | erro=${error.message}`);
+      this.logger.error(`[Conversas] Falha ao classificar intencao | erro=${error.message}`);
       return 'Desculpe, tive um problema interno. Pode repetir sua mensagem?';
     }
 
-    this.logger.log(`[Conversas] Intent=${intencao.intent} | Confianca=${intencao.confianca} | Estado=${conversa.estadoAtual} | conversa=${conversa.id}`);
+    this.logger.log(`[Conversas] Intent=${intencao.intent} | Confianca=${intencao.confianca} | Estado=${conversa.estadoAtual}`);
 
     if (intencao.intent === 'falar_vendedor') {
       await this.handoffService.criarHandoff({
@@ -161,7 +160,6 @@ export class ConversasService {
         where: { id: conversa.id },
         data: { status: 'AGUARDANDO_HUMANO', estadoAtual: 'AGUARDANDO_VENDEDOR' },
       });
-      this.logger.log(`[Conversas] ‚úÖ Handoff criado por solicitacao do cliente | conversa=${conversa.id} | telefone=${telefone}`);
       const nomeCliente = cliente.nome ? `, ${cliente.nome.split(' ')[0]}` : '';
       return `Vou chamar um vendedor${nomeCliente}. Em ate 10 minutos alguem entrara em contato!`;
     }
@@ -171,12 +169,26 @@ export class ConversasService {
       return `Ola${nomeCliente}! Como posso te ajudar?\n\nQual peca voce esta procurando? Me informe tambem o modelo e ano do veiculo.`;
     }
 
+    // MODULO 4 ó RAG para intents desconhecidos
     if (intencao.intent === 'desconhecido' || intencao.confianca < 0.6) {
+      this.logger.warn(`[Conversas] Intent desconhecido | confianca=${intencao.confianca}`);
+
+      const respostaRag = await this.ragService.buscarConhecimento(mensagem, conversa.id);
+      if (respostaRag) {
+        this.logger.log(`[Conversas] RAG respondeu para: "${mensagem}"`);
+        await this.prisma.mensagem.create({
+          data: { conversaId: conversa.id, origem: 'IA', conteudo: respostaRag },
+        });
+        return respostaRag;
+      }
+
+      this.logger.warn(`[Conversas] RAG sem resposta para: "${mensagem}"`);
+
       const mensagensCount = await this.prisma.mensagem.count({
         where: { conversaId: conversa.id, origem: 'CLIENTE' },
       });
-      this.logger.warn(`[Conversas] Intent desconhecido | confianca=${intencao.confianca} | mensagensCount=${mensagensCount} | conversa=${conversa.id}`);
-      if (mensagensCount >= 3) {
+
+      if (mensagensCount >= 5) {
         await this.handoffService.criarHandoff({
           conversaId: conversa.id,
           clienteId: cliente.id,
@@ -189,10 +201,10 @@ export class ConversasService {
           where: { id: conversa.id },
           data: { status: 'AGUARDANDO_HUMANO', estadoAtual: 'AGUARDANDO_VENDEDOR' },
         });
-        this.logger.log(`[Conversas] ‚úÖ Handoff criado por multiplas mensagens sem resolucao | conversa=${conversa.id}`);
         return 'Nao consegui entender. Vou chamar um vendedor para te ajudar!';
       }
-      return 'Desculpe, nao entendi. Pode me dizer qual peca precisa e para qual veiculo?';
+
+      return 'Nao encontrei essa informacao. Posso te ajudar a buscar uma peca ou responder duvidas sobre entrega, pagamento e horarios da loja.';
     }
 
     const ctx = {
@@ -210,18 +222,15 @@ export class ConversasService {
       },
       estadoAtual: conversa.estadoAtual,
       contexto: conversa.contexto as Record<string, any>,
+      mensagemOriginal: mensagem,
     };
 
     let resultado: any;
     try {
       resultado = await this.workflowEngine.executar(ctx);
     } catch (error) {
-      this.logger.error(`[Conversas] ‚ùå Falha no workflow | conversa=${conversa.id} | intent=${intencao.intent} | erro=${error.message}`);
+      this.logger.error(`[Conversas] Falha no workflow | intent=${intencao.intent} | erro=${error.message}`);
       return 'Desculpe, tive um problema interno. Pode repetir sua mensagem?';
-    }
-
-    if (!resultado?.resposta) {
-      this.logger.error(`[Conversas] ‚ùå Workflow retornou resposta vazia | conversa=${conversa.id} | intent=${intencao.intent}`);
     }
 
     await this.prisma.mensagem.create({
@@ -233,7 +242,6 @@ export class ConversasService {
         where: { id: conversa.id },
         data: { status: 'FINALIZADA', estadoAtual: 'FINALIZADA' },
       });
-      this.logger.log(`[Conversas] Conversa ${conversa.id} finalizada`);
       return resultado.resposta;
     }
 
@@ -262,7 +270,6 @@ export class ConversasService {
         where: { id: conversa.id },
         data: { status: 'AGUARDANDO_HUMANO' },
       });
-      this.logger.log(`[Conversas] ‚úÖ Handoff criado pelo workflow | motivo=${resultado.handoff.motivo} | conversa=${conversa.id}`);
     }
 
     return resultado.resposta;
