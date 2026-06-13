@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useEffect, useState, useCallback, useRef } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -36,6 +36,14 @@ type Metricas = {
   vendedores: { codigo: string; finalizadas: number; abandonadas: number; total: number }[];
 };
 
+type PerguntaSR = {
+  id: string;
+  pergunta: string;
+  conversaId: string | null;
+  resolvida: boolean;
+  criadoEm: string;
+};
+
 function Badge({ texto }: { texto: string }) {
   const cores: Record<string, string> = {
     URGENTE: "#dc2626", ALTA: "#ea580c", MEDIA: "#d97706", BAIXA: "#16a34a",
@@ -62,7 +70,7 @@ function Toast({ mensagem, tipo, onClose }: { mensagem: string; tipo: "erro" | "
       display: "flex", alignItems: "center", gap: 12, maxWidth: 360,
     }}>
       <span>{mensagem}</span>
-      <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 0, marginLeft: "auto" }}>Ã—</button>
+      <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 0, marginLeft: "auto" }}>�</button>
     </div>
   );
 }
@@ -133,8 +141,175 @@ function GraficoPizza({ dados }: { dados: Metricas["vendedores"] }) {
   );
 }
 
+// -- PAINEL PERGUNTAS SEM RESPOSTA ---------------------------------------------
+function PainelPerguntas({ toast, setToast }: { toast: any; setToast: any }) {
+  const [perguntas, setPerguntas] = useState<PerguntaSR[]>([]);
+  const [carregando, setCarregando] = useState(false);
+  const [filtro, setFiltro] = useState<"todas" | "pendentes">("pendentes");
+  const [busca, setBusca] = useState("");
+  const [marcando, setMarcando] = useState<string | null>(null);
+
+  const carregar = useCallback(async () => {
+    setCarregando(true);
+    try {
+      const r = await fetch(`${API}/api/rag/perguntas-sem-resposta`);
+      if (r.ok) setPerguntas(await r.json());
+    } catch {
+      setToast({ mensagem: "Erro ao carregar perguntas.", tipo: "erro" });
+    }
+    setCarregando(false);
+  }, [setToast]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  const marcarResolvida = async (id: string) => {
+    setMarcando(id);
+    try {
+      const r = await fetch(`${API}/api/rag/perguntas-sem-resposta/${id}/resolver`, { method: "PATCH" });
+      if (r.ok) {
+        setPerguntas(prev => prev.map(p => p.id === id ? { ...p, resolvida: true } : p));
+        setToast({ mensagem: "Marcada como resolvida!", tipo: "info" });
+      }
+    } catch {
+      setToast({ mensagem: "Erro ao marcar como resolvida.", tipo: "erro" });
+    }
+    setMarcando(null);
+  };
+
+  const visiveis = perguntas
+    .filter(p => filtro === "todas" || !p.resolvida)
+    .filter(p => !busca || p.pergunta.toLowerCase().includes(busca.toLowerCase()));
+
+  const totalPendentes = perguntas.filter(p => !p.resolvida).length;
+  const totalResolvidas = perguntas.filter(p => p.resolvida).length;
+
+  // agrupa por pergunta para ver frequ�ncia
+  const frequencia: Record<string, number> = {};
+  perguntas.filter(p => !p.resolvida).forEach(p => {
+    const k = p.pergunta.toLowerCase().trim();
+    frequencia[k] = (frequencia[k] || 0) + 1;
+  });
+  const topPerguntas = Object.entries(frequencia)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  return (
+    <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
+      {/* KPIs */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
+        <KpiCard label="Pendentes" valor={totalPendentes} sub="aguardam resolucao" cor="#dc2626" />
+        <KpiCard label="Resolvidas" valor={totalResolvidas} sub="base atualizada" cor="#16a34a" />
+        <KpiCard label="Total registrado" valor={perguntas.length} sub="desde o inicio" />
+        <KpiCard
+          label="Taxa resolucao"
+          valor={perguntas.length > 0 ? `${Math.round((totalResolvidas / perguntas.length) * 100)}%` : "�"}
+          sub="resolvidas / total"
+          cor="#2563eb"
+        />
+      </div>
+
+      {/* Top perguntas repetidas */}
+      {topPerguntas.length > 0 && (
+        <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 10, padding: "16px 20px", marginBottom: 24 }}>
+          <p style={{ margin: "0 0 12px 0", fontWeight: 700, fontSize: 13, color: "#92400e" }}>
+            ? Perguntas mais repetidas � adicione � base de conhecimento
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {topPerguntas.map(([pergunta, qtd]) => (
+              <div key={pergunta} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ background: "#f59e0b", color: "#fff", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700, minWidth: 28, textAlign: "center" }}>{qtd}x</span>
+                <span style={{ fontSize: 13, color: "#374151" }}>{pergunta}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Filtros e busca */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          {(["pendentes", "todas"] as const).map(f => (
+            <button key={f} onClick={() => setFiltro(f)} style={{
+              padding: "6px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer",
+              border: `1.5px solid ${filtro === f ? "#2563eb" : "#d1d5db"}`,
+              background: filtro === f ? "#eff6ff" : "#fff",
+              color: filtro === f ? "#2563eb" : "#6b7280",
+            }}>
+              {f === "pendentes" ? `Pendentes (${totalPendentes})` : `Todas (${perguntas.length})`}
+            </button>
+          ))}
+        </div>
+        <input
+          type="text"
+          value={busca}
+          onChange={e => setBusca(e.target.value)}
+          placeholder="Buscar pergunta..."
+          style={{ flex: 1, minWidth: 200, padding: "7px 12px", borderRadius: 6, border: "1.5px solid #d1d5db", fontSize: 13 }}
+        />
+        <button onClick={carregar} style={{ padding: "7px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1.5px solid #d1d5db", background: "#fff", color: "#374151" }}>
+          ? Atualizar
+        </button>
+      </div>
+
+      {/* Tabela */}
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
+        {carregando && <p style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>Carregando...</p>}
+        {!carregando && visiveis.length === 0 && (
+          <p style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
+            {busca ? "Nenhuma pergunta encontrada para essa busca." : "Nenhuma pergunta pendente. Base de conhecimento completa!"}
+          </p>
+        )}
+        {!carregando && visiveis.length > 0 && (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#f9fafb", borderBottom: "2px solid #e5e7eb" }}>
+                <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 600, color: "#374151" }}>Pergunta do cliente</th>
+                <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 600, color: "#374151", width: 160 }}>Data</th>
+                <th style={{ padding: "10px 16px", textAlign: "center", fontWeight: 600, color: "#374151", width: 100 }}>Status</th>
+                <th style={{ padding: "10px 16px", textAlign: "center", fontWeight: 600, color: "#374151", width: 130 }}>Acao</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visiveis.map((p, i) => (
+                <tr key={p.id} style={{ borderBottom: "1px solid #f3f4f6", background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+                  <td style={{ padding: "12px 16px", color: "#111827", fontWeight: p.resolvida ? 400 : 500 }}>
+                    {p.pergunta}
+                  </td>
+                  <td style={{ padding: "12px 16px", color: "#6b7280", fontSize: 12 }}>
+                    {new Date(p.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    {p.resolvida
+                      ? <span style={{ background: "#dcfce7", color: "#16a34a", borderRadius: 4, padding: "2px 10px", fontSize: 11, fontWeight: 600 }}>Resolvida</span>
+                      : <span style={{ background: "#fee2e2", color: "#dc2626", borderRadius: 4, padding: "2px 10px", fontSize: 11, fontWeight: 600 }}>Pendente</span>
+                    }
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    {!p.resolvida && (
+                      <button
+                        onClick={() => marcarResolvida(p.id)}
+                        disabled={marcando === p.id}
+                        style={{ padding: "5px 12px", background: marcando === p.id ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 6, cursor: marcando === p.id ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600 }}>
+                        {marcando === p.id ? "..." : "? Resolver"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <p style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
+        Dica: perguntas marcadas como resolvidas indicam que voce ja adicionou o conteudo na base de conhecimento (enriquecer-base.ts).
+      </p>
+    </main>
+  );
+}
+
 export default function Dashboard() {
-  const [aba, setAba] = useState<"operacional" | "admin">("operacional");
+  const [aba, setAba] = useState<"operacional" | "admin" | "perguntas">("operacional");
   const [handoffs, setHandoffs] = useState<Handoff[]>([]);
   const [selecionado, setSelecionado] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState("");
@@ -144,11 +319,6 @@ export default function Dashboard() {
   const [graficoTipo, setGraficoTipo] = useState<"barras-finalizadas" | "barras-abandonadas" | "pizza">("barras-finalizadas");
   const [carregando, setCarregando] = useState(false);
   const [toast, setToast] = useState<{ mensagem: string; tipo: "erro" | "info" } | null>(null);
-
-  // â”€â”€ BLOQUEIO ANTI-CORRIDA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // atendimentoAtivo: ID do atendimento que ESTE vendedor estÃ¡ atendendo agora.
-  // Enquanto estiver preenchido, o input de cÃ³digo fica bloqueado e os botÃµes
-  // "Assumir" de outros cards ficam desabilitados.
   const [atendimentoAtivo, setAtendimentoAtivo] = useState<string | null>(null);
 
   const carregarHandoffs = useCallback(async () => {
@@ -157,9 +327,6 @@ export default function Dashboard() {
       if (r.ok) {
         const dados: Handoff[] = await r.json();
         setHandoffs(dados);
-
-        // Se o atendimento que este vendedor estava atendendo sumiu da lista
-        // (foi resolvido ou expirou), libera o bloqueio automaticamente
         setAtendimentoAtivo((atual) => {
           if (!atual) return null;
           const aindaExiste = dados.some((h) => h.id === atual && h.status === "EM_ANDAMENTO");
@@ -175,39 +342,20 @@ export default function Dashboard() {
     setCarregando(false);
   }, []);
 
-  // â”€â”€ SSE: substitui o setInterval de 8s â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
-    // Carga inicial
     carregarHandoffs();
-
     const es = new EventSource(`${API}/api/handoff/stream`);
-
-    // Qualquer evento (novo, assumido, resolvido) recarrega a lista completa.
-    // A lista Ã© pequena (sÃ³ PENDENTE + EM_ANDAMENTO), entÃ£o um fetch completo
-    // Ã© mais simples e seguro do que aplicar diffs parciais no estado.
     const onEvento = () => carregarHandoffs();
-
     es.addEventListener("novo", onEvento);
     es.addEventListener("assumido", onEvento);
     es.addEventListener("resolvido", onEvento);
-
-    es.onerror = () => {
-      // ReconexÃ£o automÃ¡tica do EventSource em ~3s (comportamento nativo do browser)
-      console.warn("[SSE] ConexÃ£o perdida, reconectando...");
-    };
-
-    return () => {
-      es.removeEventListener("novo", onEvento);
-      es.removeEventListener("assumido", onEvento);
-      es.removeEventListener("resolvido", onEvento);
-      es.close();
-    };
+    es.onerror = () => console.warn("[SSE] Reconectando...");
+    return () => { es.removeEventListener("novo", onEvento); es.removeEventListener("assumido", onEvento); es.removeEventListener("resolvido", onEvento); es.close(); };
   }, [carregarHandoffs]);
 
   useEffect(() => { if (aba === "admin") carregarMetricas(); }, [aba, carregarMetricas]);
 
   const validarCodigo = (v: string) => {
-    // SÃ³ permite alterar o cÃ³digo se nÃ£o estiver em atendimento ativo
     if (atendimentoAtivo) return;
     const limpo = v.replace(/\D/g, "").slice(0, 3);
     setVendedorCodigo(limpo);
@@ -215,56 +363,24 @@ export default function Dashboard() {
   };
 
   const assumir = async (id: string) => {
-    if (vendedorCodigo.length !== 3) {
-      setCodigoErro("Informe seu codigo de 3 digitos antes de assumir");
-      return;
-    }
-
+    if (vendedorCodigo.length !== 3) { setCodigoErro("Informe seu codigo de 3 digitos antes de assumir"); return; }
     try {
-      const r = await fetch(`${API}/api/handoff/${id}/assumir`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vendedorId: vendedorCodigo }),
-      });
-
-      if (r.status === 409) {
-        // Outro vendedor assumiu primeiro â€” corrida perdida
-        setToast({ mensagem: "Este atendimento jÃ¡ foi assumido por outro vendedor.", tipo: "erro" });
-        carregarHandoffs(); // Atualiza a lista para refletir o novo estado
-        return;
-      }
-
-      if (!r.ok) {
-        setToast({ mensagem: "Erro ao assumir atendimento. Tente novamente.", tipo: "erro" });
-        return;
-      }
-
-      // Sucesso â€” bloqueia o input de cÃ³digo e marca o atendimento ativo
-      setAtendimentoAtivo(id);
-      setSelecionado(id);
-      carregarHandoffs();
-    } catch {
-      setToast({ mensagem: "Erro de conexÃ£o. Verifique a API.", tipo: "erro" });
-    }
+      const r = await fetch(`${API}/api/handoff/${id}/assumir`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendedorId: vendedorCodigo }) });
+      if (r.status === 409) { setToast({ mensagem: "Este atendimento ja foi assumido por outro vendedor.", tipo: "erro" }); carregarHandoffs(); return; }
+      if (!r.ok) { setToast({ mensagem: "Erro ao assumir atendimento. Tente novamente.", tipo: "erro" }); return; }
+      setAtendimentoAtivo(id); setSelecionado(id); carregarHandoffs();
+    } catch { setToast({ mensagem: "Erro de conexao. Verifique a API.", tipo: "erro" }); }
   };
 
   const resolver = async (id: string) => {
     await fetch(`${API}/api/handoff/${id}/resolver`, { method: "POST" });
-    // Libera o bloqueio â€” vendedor pode assumir novo atendimento
-    setAtendimentoAtivo(null);
-    setSelecionado(null);
-    carregarHandoffs();
+    setAtendimentoAtivo(null); setSelecionado(null); carregarHandoffs();
   };
 
   const enviarMensagem = async () => {
     if (!selecionado || !mensagem.trim() || vendedorCodigo.length !== 3) return;
-    await fetch(`${API}/api/handoff/${selecionado}/mensagem`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ texto: mensagem, vendedorId: vendedorCodigo }),
-    });
-    setMensagem("");
-    carregarHandoffs();
+    await fetch(`${API}/api/handoff/${selecionado}/mensagem`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto: mensagem, vendedorId: vendedorCodigo }) });
+    setMensagem(""); carregarHandoffs();
   };
 
   const pendentes = handoffs.filter((h) => h.status === "PENDENTE");
@@ -273,18 +389,14 @@ export default function Dashboard() {
   const mensagens = selecionadoObj?.conversa?.mensagens ?? [];
   const contexto = selecionadoObj?.conversa?.contexto;
   const nomeCliente = selecionadoObj?.conversa?.cliente?.nome ?? selecionadoObj?.conversa?.cliente?.telefone ?? "Cliente";
+  const clienteAtivo = atendimentoAtivo ? handoffs.find((h) => h.id === atendimentoAtivo)?.conversa?.cliente : null;
+  const nomeClienteAtivo = clienteAtivo?.nome ?? clienteAtivo?.telefone ?? "cliente";
 
-  const botaoAba = (a: "operacional" | "admin", label: string) => (
+  const botaoAba = (a: "operacional" | "admin" | "perguntas", label: string) => (
     <button onClick={() => setAba(a)} style={{ padding: "8px 22px", borderRadius: 6, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13, background: aba === a ? "#3b82f6" : "transparent", color: aba === a ? "#fff" : "#94a3b8" }}>
       {label}
     </button>
   );
-
-  // Nome do cliente no atendimento ativo (para exibir no label do input bloqueado)
-  const clienteAtivo = atendimentoAtivo
-    ? handoffs.find((h) => h.id === atendimentoAtivo)?.conversa?.cliente
-    : null;
-  const nomeClienteAtivo = clienteAtivo?.nome ?? clienteAtivo?.telefone ?? "cliente";
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", minHeight: "100vh", background: "#f3f4f6" }}>
@@ -292,14 +404,17 @@ export default function Dashboard() {
 
       <header style={{ background: "#1e293b", color: "#fff", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>AutoPecas â€” Painel</h1>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>AutoPecas � Painel</h1>
           <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>Gestao de atendimentos e analise operacional</p>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {botaoAba("operacional", "Operacional")}
           {botaoAba("admin", "Administracao / ROI")}
+          {botaoAba("perguntas", "Perguntas Sem Resposta")}
         </div>
       </header>
+
+      {aba === "perguntas" && <PainelPerguntas toast={toast} setToast={setToast} />}
 
       {aba === "operacional" && (
         <main style={{ padding: 24, maxWidth: 1300, margin: "0 auto" }}>
@@ -313,45 +428,16 @@ export default function Dashboard() {
             <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 20px", fontSize: 13 }}>
               <span style={{ color: "#6b7280" }}>Total </span><strong>{handoffs.length}</strong>
             </div>
-
-            {/* â”€â”€ INPUT DE CÃ“DIGO â€” bloqueia durante atendimento ativo â”€â”€ */}
             <div style={{ marginLeft: "auto" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <label style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>
                   {atendimentoAtivo ? "Em atendimento" : "Seu codigo (3 digitos)"}
                 </label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type="text"
-                    value={vendedorCodigo}
-                    onChange={(e) => validarCodigo(e.target.value)}
-                    maxLength={3}
-                    placeholder="000" autoComplete="off"
-                    disabled={!!atendimentoAtivo}
-                    style={{
-                      width: 60,
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: `1.5px solid ${codigoErro ? "#dc2626" : atendimentoAtivo ? "#d97706" : "#d1d5db"}`,
-                      fontSize: 18,
-                      fontWeight: 700,
-                      textAlign: "center",
-                      background: atendimentoAtivo ? "#fef3c7" : "#fff",
-                      color: atendimentoAtivo ? "#92400e" : "#111827",
-                      cursor: atendimentoAtivo ? "not-allowed" : "text",
-                      opacity: 1,
-                    }}
-                  />
-                </div>
+                <input type="text" value={vendedorCodigo} onChange={(e) => validarCodigo(e.target.value)} maxLength={3} placeholder="000" autoComplete="off" disabled={!!atendimentoAtivo}
+                  style={{ width: 60, padding: "6px 10px", borderRadius: 6, border: `1.5px solid ${codigoErro ? "#dc2626" : atendimentoAtivo ? "#d97706" : "#d1d5db"}`, fontSize: 18, fontWeight: 700, textAlign: "center", background: atendimentoAtivo ? "#fef3c7" : "#fff", color: atendimentoAtivo ? "#92400e" : "#111827", cursor: atendimentoAtivo ? "not-allowed" : "text" }} />
               </div>
-              {codigoErro && !atendimentoAtivo && (
-                <p style={{ fontSize: 11, color: "#dc2626", margin: "4px 0 0 0" }}>{codigoErro}</p>
-              )}
-              {atendimentoAtivo && (
-                <p style={{ fontSize: 11, color: "#d97706", margin: "4px 0 0 0", fontWeight: 600 }}>
-                  Atendendo {nomeClienteAtivo} â€” resolva para liberar
-                </p>
-              )}
+              {codigoErro && !atendimentoAtivo && <p style={{ fontSize: 11, color: "#dc2626", margin: "4px 0 0 0" }}>{codigoErro}</p>}
+              {atendimentoAtivo && <p style={{ fontSize: 11, color: "#d97706", margin: "4px 0 0 0", fontWeight: 600 }}>Atendendo {nomeClienteAtivo} � resolva para liberar</p>}
             </div>
           </div>
 
@@ -361,29 +447,19 @@ export default function Dashboard() {
               {handoffs.map((h) => {
                 const cliente = h.conversa?.cliente;
                 const ctx = h.conversa?.contexto;
-                // BotÃ£o Assumir desabilitado se este vendedor jÃ¡ tem atendimento ativo
                 const podeAssumir = h.status === "PENDENTE" && !atendimentoAtivo;
                 const esteEstaAtivo = h.id === atendimentoAtivo;
-
                 return (
                   <div key={h.id} onClick={() => setSelecionado(h.id === selecionado ? null : h.id)}
-                    style={{
-                      background: esteEstaAtivo ? "#f0fdf4" : selecionado === h.id ? "#eff6ff" : "#fff",
-                      border: `1.5px solid ${esteEstaAtivo ? "#16a34a" : selecionado === h.id ? "#3b82f6" : "#e5e7eb"}`,
-                      borderRadius: 10, padding: 16, marginBottom: 10, cursor: "pointer",
-                    }}>
+                    style={{ background: esteEstaAtivo ? "#f0fdf4" : selecionado === h.id ? "#eff6ff" : "#fff", border: `1.5px solid ${esteEstaAtivo ? "#16a34a" : selecionado === h.id ? "#3b82f6" : "#e5e7eb"}`, borderRadius: 10, padding: 16, marginBottom: 10, cursor: "pointer" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                       <div>
                         <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
                           {cliente?.nome ?? cliente?.telefone ?? "Cliente"}
-                          {esteEstaAtivo && <span style={{ marginLeft: 8, fontSize: 11, color: "#16a34a", fontWeight: 600 }}>â— seu atendimento</span>}
+                          {esteEstaAtivo && <span style={{ marginLeft: 8, fontSize: 11, color: "#16a34a", fontWeight: 600 }}>? seu atendimento</span>}
                         </p>
                         {ctx?.veiculo && <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "#6b7280" }}>{ctx.veiculo} | {ctx.tipoEntrega} | {ctx.pagamento}</p>}
-                        {ctx?.carrinho && ctx.carrinho.length > 0 && (
-                          <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "#374151" }}>
-                            {ctx.carrinho.map((c) => c.nome).join(", ")}
-                          </p>
-                        )}
+                        {ctx?.carrinho && ctx.carrinho.length > 0 && <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "#374151" }}>{ctx.carrinho.map((c) => c.nome).join(", ")}</p>}
                       </div>
                       <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                         <Badge texto={h.prioridade} />
@@ -392,34 +468,19 @@ export default function Dashboard() {
                     </div>
                     <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                       {h.status === "PENDENTE" && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); assumir(h.id); }}
-                          disabled={!podeAssumir}
-                          title={atendimentoAtivo && !esteEstaAtivo ? "VocÃª jÃ¡ estÃ¡ em um atendimento" : ""}
-                          style={{
-                            padding: "6px 14px",
-                            background: podeAssumir ? "#2563eb" : "#9ca3af",
-                            color: "#fff",
-                            border: "none",
-                            borderRadius: 6,
-                            cursor: podeAssumir ? "pointer" : "not-allowed",
-                            fontSize: 12,
-                            fontWeight: 600,
-                          }}>
+                        <button onClick={(e) => { e.stopPropagation(); assumir(h.id); }} disabled={!podeAssumir}
+                          style={{ padding: "6px 14px", background: podeAssumir ? "#2563eb" : "#9ca3af", color: "#fff", border: "none", borderRadius: 6, cursor: podeAssumir ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 600 }}>
                           Assumir
                         </button>
                       )}
                       {h.status === "EM_ANDAMENTO" && esteEstaAtivo && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); resolver(h.id); }}
+                        <button onClick={(e) => { e.stopPropagation(); resolver(h.id); }}
                           style={{ padding: "6px 14px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
                           Resolver
                         </button>
                       )}
                       {h.status === "EM_ANDAMENTO" && !esteEstaAtivo && (
-                        <span style={{ fontSize: 12, color: "#6b7280", padding: "6px 0" }}>
-                          Vendedor {h.vendedorId}
-                        </span>
+                        <span style={{ fontSize: 12, color: "#6b7280", padding: "6px 0" }}>Vendedor {h.vendedorId}</span>
                       )}
                     </div>
                   </div>
@@ -436,45 +497,24 @@ export default function Dashboard() {
                     {contexto.tipoEntrega && <div><strong>Entrega:</strong> {contexto.tipoEntrega}</div>}
                     {contexto.endereco && <div><strong>Endereco:</strong> {contexto.endereco}</div>}
                     {contexto.pagamento && <div><strong>Pagamento:</strong> {contexto.pagamento}</div>}
-                    {contexto.carrinho && contexto.carrinho.length > 0 && (
-                      <div><strong>Itens:</strong> {contexto.carrinho.map((c) => `${c.nome} (R$ ${c.preco})`).join(" | ")}</div>
-                    )}
+                    {contexto.carrinho && contexto.carrinho.length > 0 && <div><strong>Itens:</strong> {contexto.carrinho.map((c) => `${c.nome} (R$ ${c.preco})`).join(" | ")}</div>}
                   </div>
                 )}
-
                 <div style={{ background: "#f9fafb", borderRadius: 8, padding: 12, height: 280, overflowY: "auto", marginBottom: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                   {mensagens.length === 0 && <p style={{ color: "#9ca3af", fontSize: 13, margin: 0 }}>Sem mensagens registradas.</p>}
                   {[...mensagens].reverse().map((m) => (
                     <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: m.origem === "CLIENTE" ? "flex-start" : "flex-end" }}>
-                      <span style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>
-                        {m.origem} Â· {new Date(m.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                      <div style={{
-                        maxWidth: "85%", padding: "8px 12px", borderRadius: 10, fontSize: 13, lineHeight: 1.5,
-                        background: m.origem === "CLIENTE" ? "#e5e7eb" : m.origem === "IA" ? "#dbeafe" : "#f3e8ff",
-                        color: "#111827",
-                        borderBottomLeftRadius: m.origem === "CLIENTE" ? 2 : 10,
-                        borderBottomRightRadius: m.origem === "CLIENTE" ? 10 : 2,
-                      }}>
+                      <span style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>{m.origem} � {new Date(m.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                      <div style={{ maxWidth: "85%", padding: "8px 12px", borderRadius: 10, fontSize: 13, lineHeight: 1.5, background: m.origem === "CLIENTE" ? "#e5e7eb" : m.origem === "IA" ? "#dbeafe" : "#f3e8ff", color: "#111827", borderBottomLeftRadius: m.origem === "CLIENTE" ? 2 : 10, borderBottomRightRadius: m.origem === "CLIENTE" ? 10 : 2 }}>
                         {m.conteudo}
                       </div>
                     </div>
                   ))}
                 </div>
-
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    type="text"
-                    value={mensagem}
-                    onChange={(e) => setMensagem(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && enviarMensagem()}
-                    placeholder="Digite a resposta..." autoComplete="off"
-                    style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1.5px solid #d1d5db", fontSize: 13 }}
-                  />
-                  <button onClick={enviarMensagem}
-                    style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                    Enviar
-                  </button>
+                  <input type="text" value={mensagem} onChange={(e) => setMensagem(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarMensagem()} placeholder="Digite a resposta..." autoComplete="off"
+                    style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1.5px solid #d1d5db", fontSize: 13 }} />
+                  <button onClick={enviarMensagem} style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Enviar</button>
                 </div>
               </div>
             )}
@@ -486,7 +526,6 @@ export default function Dashboard() {
         <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
           {carregando && <p style={{ color: "#6b7280", textAlign: "center", marginTop: 60 }}>Carregando metricas...</p>}
           {!carregando && !metricas && <p style={{ color: "#dc2626", textAlign: "center", marginTop: 60 }}>Nao foi possivel carregar as metricas. Verifique se a API esta online.</p>}
-
           {metricas && (
             <>
               <section style={{ marginBottom: 28 }}>
@@ -498,7 +537,6 @@ export default function Dashboard() {
                   <KpiCard label="Vendas realizadas" valor={metricas.vendas.finalizadas} sub={`Conversao ${metricas.vendas.taxaConversao}%`} cor="#16a34a" />
                 </div>
               </section>
-
               <section style={{ marginBottom: 28 }}>
                 <p style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, margin: "0 0 12px 0" }}>ROI da Automacao</p>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -508,7 +546,6 @@ export default function Dashboard() {
                   <KpiCard label="Ticket medio" valor={`R$ ${metricas.vendas.ticketMedio}`} sub="estimativa configuravel" />
                 </div>
               </section>
-
               <section style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 24 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
                   <p style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, margin: 0 }}>Desempenho por Vendedor</p>
@@ -521,11 +558,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-
-                {graficoTipo === "pizza"
-                  ? <GraficoPizza dados={metricas.vendedores} />
-                  : <GraficoBarras dados={metricas.vendedores} tipo={graficoTipo === "barras-finalizadas" ? "finalizadas" : "abandonadas"} />}
-
+                {graficoTipo === "pizza" ? <GraficoPizza dados={metricas.vendedores} /> : <GraficoBarras dados={metricas.vendedores} tipo={graficoTipo === "barras-finalizadas" ? "finalizadas" : "abandonadas"} />}
                 <div style={{ marginTop: 24, overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead>
@@ -542,7 +575,7 @@ export default function Dashboard() {
                           <td style={{ padding: "10px 14px" }}>{v.total}</td>
                           <td style={{ padding: "10px 14px", color: "#16a34a", fontWeight: 600 }}>{v.finalizadas}</td>
                           <td style={{ padding: "10px 14px", color: "#dc2626" }}>{v.abandonadas}</td>
-                          <td style={{ padding: "10px 14px" }}>{v.total > 0 ? `${Math.round((v.finalizadas / v.total) * 100)}%` : "â€”"}</td>
+                          <td style={{ padding: "10px 14px" }}>{v.total > 0 ? `${Math.round((v.finalizadas / v.total) * 100)}%` : "�"}</td>
                         </tr>
                       ))}
                       {metricas.vendedores.length === 0 && (
@@ -559,4 +592,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
