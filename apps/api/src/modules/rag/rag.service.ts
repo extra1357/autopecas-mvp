@@ -205,13 +205,14 @@ Responda de forma direta e amigavel, em ate 2 linhas, usando as informacoes acim
     const embeddingStr = "[" + embedding.join(",") + "]";
 
     await this.prisma.$executeRaw`
-      INSERT INTO base_conhecimento (id, titulo, conteudo, embedding, "criadoEm", "atualizadoEm")
+      INSERT INTO base_conhecimento (id, titulo, conteudo, tags, relevancia, embedding, "criadoEm")
       VALUES (
         gen_random_uuid(),
         ${perguntaDoc.pergunta},
         ${texto},
+        ARRAY[]::text[],
+        1,
         ${embeddingStr}::vector,
-        NOW(),
         NOW()
       )
     `;
