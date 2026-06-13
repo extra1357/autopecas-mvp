@@ -139,7 +139,7 @@ export class ConversasService {
     const historico = await this.buscarHistoricoTexto(conversa.id);
     let intencao: any;
     try {
-      intencao = await this.aiService.classificarIntencao(mensagem, historico);
+      intencao = await this.aiService.classificarIntencao(mensagem, historico, conversa.estadoAtual);
     } catch (error) {
       this.logger.error(`[Conversas] Falha ao classificar intencao | erro=${error.message}`);
       return 'Desculpe, tive um problema interno. Pode repetir sua mensagem?';

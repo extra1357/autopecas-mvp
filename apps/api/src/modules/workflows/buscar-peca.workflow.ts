@@ -135,8 +135,15 @@ export class BuscarPecaWorkflow implements OnModuleInit {
         where: { id: ctx.conversaId },
         data: { contexto: novoContextoBase },
       });
-      return {
-        resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal}.\n\nTemos esse produto para: ${aplicacoes}.\n\nVerifique o ano do seu veiculo ou entre em contato com um vendedor.`,
+      await prisma.perguntaSemResposta.create({
+      data: {
+        pergunta: `${pecaFinal} para ${veiculoFinal} ${anoFinal}`,
+        conversaId: ctx.conversaId,
+        resolvida: false,
+      },
+    });
+    return {
+      resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal}.\n\nTemos esse produto para: ${aplicacoes}.\n\nVerifique o ano do seu veiculo ou entre em contato com um vendedor.`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['ANO_INCOMPATIVEL'],
         handoff: { necessario: false },
@@ -150,8 +157,15 @@ export class BuscarPecaWorkflow implements OnModuleInit {
         where: { id: ctx.conversaId },
         data: { contexto: novoContextoBase },
       });
-      return {
-        resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve?`,
+      await prisma.perguntaSemResposta.create({
+      data: {
+        pergunta: `${pecaFinal} para ${veiculoFinal} ${anoFinal}`,
+        conversaId: ctx.conversaId,
+        resolvida: false,
+      },
+    });
+    return {
+      resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} especificamente, mas temos:\n${nomes}\n\nAlguma dessas serve?`,
         novoEstado: 'AGUARDANDO_MAIS_ITENS',
         acoes: ['SIMILAR_ENCONTRADO'],
         handoff: { necessario: false },
@@ -178,6 +192,13 @@ export class BuscarPecaWorkflow implements OnModuleInit {
       data: { contexto: novoContextoBase },
     });
 
+    await prisma.perguntaSemResposta.create({
+      data: {
+        pergunta: `${pecaFinal} para ${veiculoFinal} ${anoFinal}`,
+        conversaId: ctx.conversaId,
+        resolvida: false,
+      },
+    });
     return {
       resposta: `Nao encontrei *${pecaFinal}* para ${veiculoFinal} ${anoFinal} no nosso estoque.\n\nPosso buscar outra peca, ou finalizamos o pedido com os itens ja selecionados?`,
       novoEstado: 'AGUARDANDO_MAIS_ITENS',
@@ -186,3 +207,4 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     };
   }
 }
+

@@ -23,33 +23,37 @@ export class AiService {
     this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   }
 
-  async classificarIntencao(mensagem: string, historico: string = ''): Promise<IntencaoIA> {
+  async classificarIntencao(mensagem: string, historico: string = '', estadoAtual: string = 'INICIO'): Promise<IntencaoIA> {
+    const estadosComPeca = ['AGUARDANDO_MAIS_ITENS', 'AGUARDANDO_TIPO_ATENDIMENTO', 'AGUARDANDO_ENDERECO', 'AGUARDANDO_PAGAMENTO'];
+    const temPecaNoCarrinho = estadosComPeca.includes(estadoAtual);
+
     const prompt = `Voce e um classificador semantico para uma loja de autopecas brasileira.
 Analise a mensagem e retorne APENAS um JSON valido, sem texto adicional.
+
+Estado atual da conversa: ${estadoAtual}
+O cliente ja tem peca no carrinho: ${temPecaNoCarrinho ? 'SIM' : 'NAO'}
 
 Intents possiveis:
 - buscar_peca: cliente quer comprar ou verificar disponibilidade de UMA PECA ESPECIFICA. Exemplos: "tem amortecedor?", "preciso de filtro de oleo", "pastilha de freio para Civic"
 - querer_mais_itens: cliente quer adicionar mais pecas. Exemplos: "sim", "quero mais", "tenho outra peca", "adicionar", "mais uma"
 - finalizar_itens: cliente nao quer mais pecas. Exemplos: "nao", "so isso", "e tudo", "nao obrigado", "pode finalizar", "somente isso"
-- escolher_retirada: cliente quer retirar na loja. Exemplos: "retirada", "vou buscar", "pegar na loja", "retirar", "loja", "busco ai", "retiro"
-- escolher_entrega: cliente quer receber em casa. Exemplos: "delivery", "entrega", "entregar", "para entregar", "quero delivery", "receber", "receber em casa", "me manda"
-- informar_endereco: cliente fornece um endereco. QUALQUER mensagem que contenha rua, avenida, numero, bairro, cidade ou CEP deve ser classificada como informar_endereco.
+- escolher_retirada: cliente quer retirar na loja. SO USE quando "tem peca no carrinho = SIM". Exemplos: "retirada", "vou buscar", "pegar na loja"
+- escolher_entrega: cliente quer receber em casa. SO USE quando "tem peca no carrinho = SIM". Exemplos: "delivery", "entrega", "entregar", "me manda"
+- informar_endereco: cliente fornece um endereco. QUALQUER mensagem que contenha rua, avenida, numero, bairro, cidade ou CEP.
 - informar_pagamento: cliente informa forma de pagamento. Exemplos: "pix", "cartao", "dinheiro", "credito", "debito"
 - confirmar_pedido: cliente confirma o pedido. Exemplos: "sim", "confirmo", "esta correto", "pode ser", "tudo certo", "ok"
 - corrigir_pedido: cliente quer alterar algo. Exemplos: "nao", "quero mudar", "esta errado", "corrigir"
-- encerrar_conversa: cliente se despede ou agradece apos pedido. Exemplos: "obrigado", "tchau", "ate mais", "valeu", "ok obrigado"
+- encerrar_conversa: cliente se despede ou agradece apos pedido. Exemplos: "obrigado", "tchau", "ate mais", "valeu"
 - falar_vendedor: cliente quer falar com humano
 - saudacao: APENAS cumprimentos simples sem pergunta. Exemplos: "oi", "ola", "bom dia", "boa tarde", "boa noite"
-- desconhecido: perguntas sobre a loja, politicas, horarios, pagamento, entrega, garantia, troca, parcelamento, ou qualquer coisa que nao seja uma acao de compra. Exemplos: "voces parcelam?", "qual o horario?", "fazem entrega para Itu?", "aceitam cheque?", "qual o prazo de troca?", "tem nota fiscal?"
+- desconhecido: perguntas sobre a loja, politicas, horarios, formas de pagamento, garantia, troca, parcelamento, area de entrega. Exemplos: "voces parcelam?", "qual o horario?", "fazem entrega para Itu?", "aceitam cheque?", "qual o prazo de troca?", "tem nota fiscal?", "voces fazem entrega?", "qual a area de entrega?"
 
 REGRAS CRITICAS:
-1. buscar_peca SOMENTE quando o cliente citar uma peca automotiva especifica. "parcelam em 12x" NAO e buscar_peca.
-2. Perguntas sobre politicas, horarios, formas de pagamento genericas, garantia ? SEMPRE desconhecido.
-3. Saudacao SOMENTE para cumprimentos puros, sem nenhuma pergunta junto.
-4. Se a mensagem contem logradouro (Rua, Av, Avenida, R., Al.) ? informar_endereco.
-5. Use o historico para entender o contexto atual da conversa.
-6. Se o bot perguntou "mais alguma peca?" ? querer_mais_itens ou finalizar_itens.
-7. Se o bot perguntou "esta tudo correto?" ? confirmar_pedido ou corrigir_pedido.
+1. buscar_peca SOMENTE quando o cliente citar uma peca automotiva especifica.
+2. escolher_entrega e escolher_retirada SOMENTE quando "tem peca no carrinho = SIM". Caso contrario ? desconhecido.
+3. Perguntas sobre politicas, horarios, area de entrega, garantia ? SEMPRE desconhecido.
+4. saudacao SOMENTE para cumprimentos puros sem nenhuma pergunta.
+5. Se a mensagem contem logradouro (Rua, Av, Avenida) ? informar_endereco.
 
 Historico recente:
 ${historico || 'nenhum'}
@@ -83,7 +87,7 @@ Responda APENAS com JSON:
       if (!jsonMatch) throw new Error('JSON nao encontrado');
 
       const resultado = JSON.parse(jsonMatch[0]) as IntencaoIA;
-      this.logger.debug(`Intent: ${resultado.intent} (confianca: ${resultado.confianca})`);
+      this.logger.debug(`Intent: ${resultado.intent} (confianca: ${resultado.confianca}) | Estado: ${estadoAtual}`);
       return resultado;
     } catch (err) {
       this.logger.error('Erro ao classificar intencao:', err);
