@@ -7,9 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─────────────────────────────────────────
-// CLIENTE
-// ─────────────────────────────────────────
 model Cliente {
   id                  String    @id @default(uuid())
   nome                String?
@@ -18,6 +15,8 @@ model Cliente {
   aceitaMarketing     Boolean?
   consentimentoEm     DateTime?
   consentimentoOrigem String?
+  veiculoModelo       String?
+  veiculoAno          String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -27,9 +26,6 @@ model Cliente {
   @@map("clientes")
 }
 
-// ─────────────────────────────────────────
-// CONVERSA
-// ─────────────────────────────────────────
 enum StatusConversa {
   ATIVA
   AGUARDANDO_HUMANO
@@ -74,9 +70,6 @@ model Conversa {
   @@map("conversas")
 }
 
-// ─────────────────────────────────────────
-// MENSAGEM
-// ─────────────────────────────────────────
 enum OrigemMensagem {
   CLIENTE
   IA
@@ -97,9 +90,6 @@ model Mensagem {
   @@map("mensagens")
 }
 
-// ─────────────────────────────────────────
-// PRODUTO / PEÇA
-// ─────────────────────────────────────────
 model Produto {
   id        String   @id @default(uuid())
   codigo    String   @unique
@@ -116,9 +106,6 @@ model Produto {
   @@map("produtos")
 }
 
-// ─────────────────────────────────────────
-// PEDIDO
-// ─────────────────────────────────────────
 enum StatusPedido {
   RASCUNHO
   AGUARDANDO_PAGAMENTO
@@ -153,8 +140,8 @@ model Pedido {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  cliente  Cliente     @relation(fields: [clienteId], references: [id])
-  conversa Conversa?   @relation(fields: [conversaId], references: [id])
+  cliente  Cliente      @relation(fields: [clienteId], references: [id])
+  conversa Conversa?    @relation(fields: [conversaId], references: [id])
   itens    ItemPedido[]
 
   @@map("pedidos")
@@ -173,9 +160,6 @@ model ItemPedido {
   @@map("itens_pedido")
 }
 
-// ─────────────────────────────────────────
-// ATENDIMENTO / HANDOFF
-// ─────────────────────────────────────────
 enum StatusAtendimento {
   PENDENTE
   EM_ANDAMENTO
@@ -208,9 +192,6 @@ model Atendimento {
   @@map("atendimentos")
 }
 
-// ─────────────────────────────────────────
-// LOG / AUDITORIA
-// ─────────────────────────────────────────
 model LogConversa {
   id         String   @id @default(uuid())
   conversaId String
@@ -222,16 +203,24 @@ model LogConversa {
 
   @@map("logs_conversa")
 }
-// -------------------------------------------
-// BASE DE CONHECIMENTO (RAG - FAQ)
-// -------------------------------------------
+
 model BaseConhecimento {
   id         String   @id @default(uuid())
   titulo     String
   conteudo   String
   tags       String[]
   relevancia Int      @default(1)
-  criadoEm  DateTime @default(now())
+  criadoEm   DateTime @default(now())
 
   @@map("base_conhecimento")
+}
+
+model PerguntaSemResposta {
+  id         String   @id @default(uuid())
+  pergunta   String
+  conversaId String?
+  resolvida  Boolean  @default(false)
+  criadoEm   DateTime @default(now())
+
+  @@map("perguntas_sem_resposta")
 }

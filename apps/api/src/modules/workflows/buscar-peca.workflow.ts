@@ -34,9 +34,19 @@ export class BuscarPecaWorkflow implements OnModuleInit {
     const contexto = (conversaAtual?.contexto as Record<string, any>) || ctx.contexto;
     const carrinho: any[] = contexto.carrinho || [];
 
-    const veiculoFinal = veiculo || contexto.veiculoAtual;
-    const anoFinal = ano || contexto.anoAtual;
+    // MODULO 3 — Recupera veiculo salvo no perfil do cliente
+    const perfilCliente = await prisma.cliente.findUnique({
+      where: { id: ctx.clienteId },
+      select: { veiculoModelo: true, veiculoAno: true },
+    });
+
+    const veiculoFinal = veiculo || contexto.veiculoAtual || perfilCliente?.veiculoModelo || null;
+    const anoFinal = ano || contexto.anoAtual || perfilCliente?.veiculoAno || null;
     const pecaFinal = peca || contexto.pecaPendente;
+
+    if (veiculoFinal && !contexto.veiculoAtual) {
+      this.logger.log(`Veiculo restaurado do perfil: ${veiculoFinal} ${anoFinal}`);
+    }
 
     if (!pecaFinal) {
       return {
@@ -65,6 +75,19 @@ export class BuscarPecaWorkflow implements OnModuleInit {
         acoes: ['SOLICITOU_VEICULO_ANO'],
         handoff: { necessario: false },
       };
+    }
+
+    // MODULO 3 — Salva veiculo no perfil sempre que for confirmado
+    const veiculoEraDesconhecido = !perfilCliente?.veiculoModelo || perfilCliente.veiculoModelo !== veiculoFinal;
+    if (veiculoEraDesconhecido) {
+      await prisma.cliente.update({
+        where: { id: ctx.clienteId },
+        data: {
+          veiculoModelo: veiculoFinal,
+          veiculoAno: anoFinal,
+        },
+      });
+      this.logger.log(`Veiculo salvo no perfil: ${veiculoFinal} ${anoFinal}`);
     }
 
     const novoContextoBase = {

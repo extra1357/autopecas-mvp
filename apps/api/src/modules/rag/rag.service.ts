@@ -11,53 +11,68 @@ export class RagService {
     this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   }
 
-  async buscarConhecimento(pergunta: string): Promise<string | null> {
-    const palavras = pergunta.toLowerCase().split(' ').filter(p => p.length > 3);
-
+  async buscarConhecimento(pergunta: string, conversaId?: string): Promise<string | null> {
     const chunks = await this.prisma.baseConhecimento.findMany({
       where: {
         OR: [
           { conteudo: { contains: pergunta, mode: 'insensitive' } },
-          { titulo: { contains: pergunta, mode: 'insensitive' } },
-          ...(palavras.length > 0 ? [{ tags: { hasSome: palavras } }] : []),
+          { tags: { hasSome: pergunta.toLowerCase().split(' ').filter(p => p.length > 3) } },
         ],
       },
       take: 3,
       orderBy: { relevancia: 'desc' },
     });
 
-    if (chunks.length === 0) return null;
+    if (chunks.length === 0) {
+      // MODULO 4 — Registra pergunta sem resposta para analise
+      await this.prisma.perguntaSemResposta.create({
+        data: {
+          pergunta,
+          conversaId: conversaId ?? null,
+        },
+      });
+      this.logger.warn(`Pergunta sem resposta registrada: "${pergunta}"`);
+      return null;
+    }
 
-    const contexto = chunks.map(c => `${c.titulo}:\n${c.conteudo}`).join('\n\n');
+    const contexto = chunks.map(c => c.conteudo).join('\n\n');
 
-    try {
-      const completion = await this.groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          {
-            role: 'user',
-            content: `Voce e o atendente virtual de uma loja de autopecas brasileira.
-Use APENAS as informacoes abaixo para responder a pergunta do cliente.
-Se a resposta nao estiver nas informacoes, retorne exatamente: NAO_ENCONTRADO
+    const completion = await this.groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        {
+          role: 'user',
+          content: `Voce e o atendente virtual de uma loja de autopecas.
+Use APENAS as informacoes abaixo para responder.
+Se a resposta nao estiver nas informacoes, diga que vai verificar com um vendedor.
 
 Informacoes da loja:
 ${contexto}
 
 Pergunta do cliente: "${pergunta}"
 
-Responda de forma direta e amigavel, em ate 3 linhas. Sem introducoes como "Claro!" ou "Olha,".`,
-          },
-        ],
-        temperature: 0.2,
-        max_tokens: 200,
-      });
+Responda de forma direta e amigavel, em ate 3 linhas.`,
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 200,
+    });
 
-      const resposta = completion.choices[0]?.message?.content?.trim() ?? '';
-      if (resposta === 'NAO_ENCONTRADO' || resposta === '') return null;
-      return resposta;
-    } catch (err) {
-      this.logger.error('Erro no RagService:', err);
-      return null;
-    }
+    return completion.choices[0]?.message?.content?.trim() ?? null;
+  }
+
+  async listarPerguntasSemResposta() {
+    return this.prisma.perguntaSemResposta.findMany({
+      where: { resolvida: false },
+      orderBy: { criadoEm: 'desc' },
+      take: 50,
+    });
+  }
+
+  async marcarResolvida(id: string) {
+    return this.prisma.perguntaSemResposta.update({
+      where: { id },
+      data: { resolvida: true },
+    });
   }
 }
