@@ -70,7 +70,7 @@ function Toast({ mensagem, tipo, onClose }: { mensagem: string; tipo: "erro" | "
       display: "flex", alignItems: "center", gap: 12, maxWidth: 360,
     }}>
       <span>{mensagem}</span>
-      <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 0, marginLeft: "auto" }}>×</button>
+      <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 0, marginLeft: "auto" }}>Ã—</button>
     </div>
   );
 }
@@ -147,6 +147,9 @@ function PainelPerguntas({ toast, setToast }: { toast: any; setToast: any }) {
   const [carregando, setCarregando] = useState(false);
   const [filtro, setFiltro] = useState<"todas" | "pendentes">("pendentes");
   const [busca, setBusca] = useState("");
+  const [modalResolver, setModalResolver] = useState<{id: string, pergunta: string} | null>(null);
+  const [respostaModal, setRespostaModal] = useState("");
+  const [salvando, setSalvando] = useState(false);
   const [marcando, setMarcando] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
@@ -162,10 +165,12 @@ function PainelPerguntas({ toast, setToast }: { toast: any; setToast: any }) {
 
   useEffect(() => { carregar(); }, [carregar]);
 
-  const marcarResolvida = async (id: string) => {
+  const abrirModal = (id: string, pergunta: string) => { console.log("abrirModal chamado", id, pergunta); setModalResolver({id, pergunta}); setRespostaModal(""); };
+  console.log("modalResolver estado atual:", modalResolver);
+  const marcarResolvida = async (id: string, resposta: string) => {
     setMarcando(id);
     try {
-      const r = await fetch(`${API}/api/rag/perguntas-sem-resposta/${id}/resolver`, { method: "PATCH" });
+      const r = await fetch(`${API}/api/rag/perguntas-sem-resposta/${id}/resolver`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resposta }) });
       if (r.ok) {
         setPerguntas(prev => prev.map(p => p.id === id ? { ...p, resolvida: true } : p));
         setToast({ mensagem: "Marcada como resolvida!", tipo: "info" });
@@ -183,7 +188,7 @@ function PainelPerguntas({ toast, setToast }: { toast: any; setToast: any }) {
   const totalPendentes = perguntas.filter(p => !p.resolvida).length;
   const totalResolvidas = perguntas.filter(p => p.resolvida).length;
 
-  // agrupa por pergunta para ver frequência
+  // agrupa por pergunta para ver frequÃªncia
   const frequencia: Record<string, number> = {};
   perguntas.filter(p => !p.resolvida).forEach(p => {
     const k = p.pergunta.toLowerCase().trim();
@@ -202,7 +207,7 @@ function PainelPerguntas({ toast, setToast }: { toast: any; setToast: any }) {
         <KpiCard label="Total registrado" valor={perguntas.length} sub="desde o inicio" />
         <KpiCard
           label="Taxa resolucao"
-          valor={perguntas.length > 0 ? `${Math.round((totalResolvidas / perguntas.length) * 100)}%` : "—"}
+          valor={perguntas.length > 0 ? `${Math.round((totalResolvidas / perguntas.length) * 100)}%` : "â€”"}
           sub="resolvidas / total"
           cor="#2563eb"
         />
@@ -212,7 +217,7 @@ function PainelPerguntas({ toast, setToast }: { toast: any; setToast: any }) {
       {topPerguntas.length > 0 && (
         <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 10, padding: "16px 20px", marginBottom: 24 }}>
           <p style={{ margin: "0 0 12px 0", fontWeight: 700, fontSize: 13, color: "#92400e" }}>
-            ? Perguntas mais repetidas — adicione à base de conhecimento
+            ? Perguntas mais repetidas â€” adicione Ã  base de conhecimento
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {topPerguntas.map(([pergunta, qtd]) => (
@@ -287,7 +292,7 @@ function PainelPerguntas({ toast, setToast }: { toast: any; setToast: any }) {
                   <td style={{ padding: "12px 16px", textAlign: "center" }}>
                     {!p.resolvida && (
                       <button
-                        onClick={() => marcarResolvida(p.id)}
+                        onClick={() => abrirModal(p.id, p.pergunta)}
                         disabled={marcando === p.id}
                         style={{ padding: "5px 12px", background: marcando === p.id ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 6, cursor: marcando === p.id ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600 }}>
                         {marcando === p.id ? "..." : "? Resolver"}
@@ -304,6 +309,42 @@ function PainelPerguntas({ toast, setToast }: { toast: any; setToast: any }) {
       <p style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
         Dica: perguntas marcadas como resolvidas indicam que voce ja adicionou o conteudo na base de conhecimento (enriquecer-base.ts).
       </p>
+      {modalResolver && (
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+          <div style={{background:"#1e293b",border:"1px solid #334155",borderRadius:12,padding:32,width:"100%",maxWidth:500,boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+            <h3 style={{margin:"0 0 8px",color:"#f1f5f9",fontSize:18}}>Treinar RAG</h3>
+            <p style={{margin:"0 0 16px",color:"#94a3b8",fontSize:13}}>Adicione a resposta correta. Ela ser\u00e1 inserida automaticamente na base de conhecimento.</p>
+            <div style={{background:"#0f172a",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
+              <p style={{margin:0,fontSize:12,color:"#64748b"}}>Pergunta do cliente</p>
+              <p style={{margin:"4px 0 0",color:"#e2e8f0",fontSize:14}}>{modalResolver.pergunta}</p>
+            </div>
+            <textarea
+              value={respostaModal}
+              onChange={e => setRespostaModal(e.target.value)}
+              placeholder="Digite a resposta que o bot deve dar..."
+              rows={4}
+              style={{width:"100%",background:"#0f172a",border:"1px solid #334155",borderRadius:8,padding:"10px 14px",color:"#f1f5f9",fontSize:14,resize:"vertical",boxSizing:"border-box",outline:"none"}}
+            />
+            <div style={{display:"flex",gap:12,marginTop:16,justifyContent:"flex-end"}}>
+              <button onClick={() => setModalResolver(null)} style={{padding:"8px 20px",background:"transparent",border:"1px solid #475569",borderRadius:8,color:"#94a3b8",cursor:"pointer",fontSize:14}}>
+                Cancelar
+              </button>
+              <button
+                disabled={!respostaModal.trim() || salvando}
+                onClick={async () => {
+                  setSalvando(true);
+                  await marcarResolvida(modalResolver.id, respostaModal);
+                  setSalvando(false);
+                  setModalResolver(null);
+                }}
+                style={{padding:"8px 20px",background:respostaModal.trim()?"#3b82f6":"#1e3a5f",border:"none",borderRadius:8,color:"#fff",cursor:respostaModal.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:600}}
+              >
+                {salvando ? "Salvando..." : "Salvar e Treinar RAG"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -404,8 +445,8 @@ export default function Dashboard() {
 
       <header style={{ background: "#1e293b", color: "#fff", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>AutoPecas — Painel</h1>
-          <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>Gestao de atendimentos e analise operacional</p>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>AutoPecas â€” Painel</h1>
+          <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>GestÃ£o de atendimentos e anÃ¡lise operacional</p>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {botaoAba("operacional", "Operacional")}
@@ -437,7 +478,7 @@ export default function Dashboard() {
                   style={{ width: 60, padding: "6px 10px", borderRadius: 6, border: `1.5px solid ${codigoErro ? "#dc2626" : atendimentoAtivo ? "#d97706" : "#d1d5db"}`, fontSize: 18, fontWeight: 700, textAlign: "center", background: atendimentoAtivo ? "#fef3c7" : "#fff", color: atendimentoAtivo ? "#92400e" : "#111827", cursor: atendimentoAtivo ? "not-allowed" : "text" }} />
               </div>
               {codigoErro && !atendimentoAtivo && <p style={{ fontSize: 11, color: "#dc2626", margin: "4px 0 0 0" }}>{codigoErro}</p>}
-              {atendimentoAtivo && <p style={{ fontSize: 11, color: "#d97706", margin: "4px 0 0 0", fontWeight: 600 }}>Atendendo {nomeClienteAtivo} — resolva para liberar</p>}
+              {atendimentoAtivo && <p style={{ fontSize: 11, color: "#d97706", margin: "4px 0 0 0", fontWeight: 600 }}>Atendendo {nomeClienteAtivo} â€” resolva para liberar</p>}
             </div>
           </div>
 
@@ -504,7 +545,7 @@ export default function Dashboard() {
                   {mensagens.length === 0 && <p style={{ color: "#9ca3af", fontSize: 13, margin: 0 }}>Sem mensagens registradas.</p>}
                   {[...mensagens].reverse().map((m) => (
                     <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: m.origem === "CLIENTE" ? "flex-start" : "flex-end" }}>
-                      <span style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>{m.origem} · {new Date(m.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                      <span style={{ fontSize: 10, color: "#9ca3af", marginBottom: 2 }}>{m.origem} Â· {new Date(m.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
                       <div style={{ maxWidth: "85%", padding: "8px 12px", borderRadius: 10, fontSize: 13, lineHeight: 1.5, background: m.origem === "CLIENTE" ? "#e5e7eb" : m.origem === "IA" ? "#dbeafe" : "#f3e8ff", color: "#111827", borderBottomLeftRadius: m.origem === "CLIENTE" ? 2 : 10, borderBottomRightRadius: m.origem === "CLIENTE" ? 10 : 2 }}>
                         {m.conteudo}
                       </div>
@@ -575,7 +616,7 @@ export default function Dashboard() {
                           <td style={{ padding: "10px 14px" }}>{v.total}</td>
                           <td style={{ padding: "10px 14px", color: "#16a34a", fontWeight: 600 }}>{v.finalizadas}</td>
                           <td style={{ padding: "10px 14px", color: "#dc2626" }}>{v.abandonadas}</td>
-                          <td style={{ padding: "10px 14px" }}>{v.total > 0 ? `${Math.round((v.finalizadas / v.total) * 100)}%` : "—"}</td>
+                          <td style={{ padding: "10px 14px" }}>{v.total > 0 ? `${Math.round((v.finalizadas / v.total) * 100)}%` : "â€”"}</td>
                         </tr>
                       ))}
                       {metricas.vendedores.length === 0 && (
@@ -585,10 +626,15 @@ export default function Dashboard() {
                   </table>
                 </div>
               </section>
+
+
             </>
           )}
-        </main>
+        
+
+            </main>
       )}
+    
     </div>
   );
 }

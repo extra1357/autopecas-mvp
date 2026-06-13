@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+ï»¿import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { WorkflowEngine } from '../workflows/workflow.engine';
@@ -59,13 +59,14 @@ export class ConversasService {
     });
 
     if (conversa.status === 'AGUARDANDO_HUMANO' || conversa.status === 'EM_ATENDIMENTO') {
-      this.logger.warn(`[Conversas] Mensagem de ${telefone} ignorada — conversa=${conversa.id} status=${conversa.status}`);
+      this.logger.warn(`[Conversas] Mensagem de ${telefone} ignorada ï¿½ conversa=${conversa.id} status=${conversa.status}`);
       return '';
     }
 
     const contextoAtual = (conversa.contexto as Record<string, any>) || {};
 
-    if (!cliente.nome && !contextoAtual.aguardandoNome && conversa.estadoAtual === 'INICIO') {
+    const isTeste = telefone.startsWith('5500');
+    if (!isTeste && !cliente.nome && !contextoAtual.aguardandoNome && conversa.estadoAtual === 'INICIO') {
       await this.prisma.conversa.update({
         where: { id: conversa.id },
         data: { contexto: { ...contextoAtual, aguardandoNome: true } },
@@ -86,7 +87,7 @@ export class ConversasService {
       });
       cliente = { ...cliente, nome: mensagem.trim() };
       this.logger.log(`[Conversas] Nome coletado: "${mensagem.trim()}" para cliente=${cliente.id}`);
-      const resposta = `Prazer, ${nome}! ??\n\nPosso te enviar promoções, ofertas e novidades por WhatsApp? Responda *sim* ou *não*. Você pode cancelar quando quiser. ??`;
+      const resposta = `Prazer, ${nome}! ??\n\nPosso te enviar promoï¿½ï¿½es, ofertas e novidades por WhatsApp? Responda *sim* ou *nï¿½o*. Vocï¿½ pode cancelar quando quiser. ??`;
       await this.prisma.mensagem.create({
         data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
       });
@@ -96,10 +97,10 @@ export class ConversasService {
     if (contextoAtual.aguardandoConsentimento && cliente.aceitaMarketing === null) {
       const respostaNormalizada = mensagem.toLowerCase().trim();
       const aceitou = ['sim', 's', 'yes', '1', 'quero', 'pode'].includes(respostaNormalizada);
-      const recusou = ['nao', 'não', 'n', 'no', '0', 'nope'].includes(respostaNormalizada);
+      const recusou = ['nao', 'nï¿½o', 'n', 'no', '0', 'nope'].includes(respostaNormalizada);
 
       if (!aceitou && !recusou) {
-        const resposta = `Por favor, responda *sim* ou *não*. Posso te enviar promoções e novidades por WhatsApp?`;
+        const resposta = `Por favor, responda *sim* ou *nï¿½o*. Posso te enviar promoï¿½ï¿½es e novidades por WhatsApp?`;
         await this.prisma.mensagem.create({
           data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
         });
@@ -127,8 +128,8 @@ export class ConversasService {
 
       const nome = cliente.nome?.split(' ')[0] ?? '';
       const resposta = aceitou
-        ? `Ótimo, ${nome}! Você receberá nossas melhores ofertas. ??\n\nAgora, qual peça você está procurando? Me informe também o modelo e ano do veículo.`
-        : `Sem problema, ${nome}! Você não receberá mensagens de marketing.\n\nQual peça você está procurando? Me informe também o modelo e ano do veículo.`;
+        ? `ï¿½timo, ${nome}! Vocï¿½ receberï¿½ nossas melhores ofertas. ??\n\nAgora, qual peï¿½a vocï¿½ estï¿½ procurando? Me informe tambï¿½m o modelo e ano do veï¿½culo.`
+        : `Sem problema, ${nome}! Vocï¿½ nï¿½o receberï¿½ mensagens de marketing.\n\nQual peï¿½a vocï¿½ estï¿½ procurando? Me informe tambï¿½m o modelo e ano do veï¿½culo.`;
 
       await this.prisma.mensagem.create({
         data: { conversaId: conversa.id, origem: 'IA', conteudo: resposta },
@@ -169,7 +170,7 @@ export class ConversasService {
       return `Ola${nomeCliente}! Como posso te ajudar?\n\nQual peca voce esta procurando? Me informe tambem o modelo e ano do veiculo.`;
     }
 
-    // MODULO 4 — RAG para intents desconhecidos
+    // MODULO 4 ï¿½ RAG para intents desconhecidos
     if (intencao.intent === 'desconhecido' || intencao.confianca < 0.6) {
       this.logger.warn(`[Conversas] Intent desconhecido | confianca=${intencao.confianca}`);
 
