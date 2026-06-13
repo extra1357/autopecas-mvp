@@ -26,3 +26,14 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Scripts de debug/sessao
+apps/api/check-*.js
+apps/api/reset-*.js
+apps/api/debug-*.js
+apps/api/seed-*.js
+apps/api/regen-*.js
+apps/api/test-rag.js
+apps/api/src/prisma/check_*.ts
+apps/api/src/prisma/debug_*.ts
+fix-encoding*.py
