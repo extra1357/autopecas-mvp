@@ -194,14 +194,8 @@ Responda de forma direta e amigavel, em ate 2 linhas, usando as informacoes acim
     const perguntaDoc = await this.prisma.perguntaSemResposta.findUnique({ where: { id } });
     if (!perguntaDoc) throw new Error("Pergunta nao encontrada");
 
-    // Valida que a resposta e sobre politica, nao sobre peca especifica
-    const tipo = this.classificarPergunta(perguntaDoc.pergunta);
-    if (tipo === "peca") {
-      throw new Error("Perguntas sobre pecas nao devem ser respondidas manualmente. Cadastre a peca no catalogo.");
-    }
-
     const texto = `Pergunta: ${perguntaDoc.pergunta}\nResposta: ${resposta}`;
-    const embedding = await this.gerarEmbedding(texto);
+    const embedding = await this.gerarEmbedding(perguntaDoc.pergunta);
     const embeddingStr = "[" + embedding.join(",") + "]";
 
     await this.prisma.$executeRaw`
