@@ -15,11 +15,22 @@ export class RagService {
   }
 
   private async gerarEmbedding(texto: string): Promise<number[]> {
-    const result = await this.hf.featureExtraction({
-      model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-      inputs: texto,
+    const apiKey = process.env.HUGGINGFACE_API_KEY;
+    const url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2";
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ inputs: texto, options: { wait_for_model: true } }),
     });
-    return Array.isArray(result[0]) ? (result as number[][])[0] : (result as number[]);
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`HuggingFace API error ${resp.status}: ${err}`);
+    }
+    const result = await resp.json();
+    return Array.isArray(result[0]) ? result[0] : result;
   }
 
   // Classifica se a pergunta e sobre peca/estoque ou sobre politica da loja
