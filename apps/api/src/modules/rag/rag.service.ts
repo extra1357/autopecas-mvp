@@ -15,12 +15,45 @@ export class RagService {
   }
 
   private async gerarEmbedding(texto: string): Promise<number[]> {
-    const result = await this.hf.featureExtraction({
-      model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-      inputs: texto,
-      provider: "hf-inference",
+    const apiKey = process.env.HUGGINGFACE_API_KEY;
+
+    if (!apiKey) {
+      throw new Error("HUGGINGFACE_API_KEY nao configurada");
+    }
+
+    const url =
+      "https://api-inference.huggingface.co/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2";
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        inputs: texto,
+        options: {
+          wait_for_model: true,
+        },
+      }),
     });
-    return Array.isArray(result[0]) ? (result as number[][])[0] : (result as number[]);
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`HuggingFace API error ${resp.status}: ${err}`);
+    }
+
+    const result = await resp.json();
+
+    if (Array.isArray(result) && Array.isArray(result[0])) {
+      return result[0] as number[];
+    }
+
+    if (Array.isArray(result)) {
+      return result as number[];
+    }
+
+    throw new Error(`Resposta inesperada da HuggingFace: ${JSON.stringify(result)}`);
   }
 
   // Classifica se a pergunta e sobre peca/estoque ou sobre politica da loja
