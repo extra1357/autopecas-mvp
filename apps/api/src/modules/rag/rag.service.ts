@@ -14,46 +14,19 @@ export class RagService {
     this.hf = new HfInference(process.env.HUGGINGFACE_API_KEY);
   }
 
+  private embedder: any = null;
+
   private async gerarEmbedding(texto: string): Promise<number[]> {
-    const apiKey = process.env.HUGGINGFACE_API_KEY;
-
-    if (!apiKey) {
-      throw new Error("HUGGINGFACE_API_KEY nao configurada");
+    if (!this.embedder) {
+      const transformers: any = await (eval('import("@huggingface/transformers")') as Promise<any>);
+      this.embedder = await transformers.pipeline(
+        "feature-extraction",
+        "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+        { dtype: "q8" },
+      );
     }
-
-    const url =
-      "https://api-inference.huggingface.co/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2";
-
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        inputs: texto,
-        options: {
-          wait_for_model: true,
-        },
-      }),
-    });
-
-    if (!resp.ok) {
-      const err = await resp.text();
-      throw new Error(`HuggingFace API error ${resp.status}: ${err}`);
-    }
-
-    const result = await resp.json();
-
-    if (Array.isArray(result) && Array.isArray(result[0])) {
-      return result[0] as number[];
-    }
-
-    if (Array.isArray(result)) {
-      return result as number[];
-    }
-
-    throw new Error(`Resposta inesperada da HuggingFace: ${JSON.stringify(result)}`);
+    const output = await this.embedder(texto, { pooling: "mean", normalize: true });
+    return Array.from(output.data as Float32Array);
   }
 
   // Classifica se a pergunta e sobre peca/estoque ou sobre politica da loja

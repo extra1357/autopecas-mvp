@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@huggingface/inference": "^4.13.18",
+    "@huggingface/transformers": "^4.2.0",
     "@nestjs/bull": "^10.1.1",
     "@nestjs/cli": "^10.4.9",
     "@nestjs/common": "^10.3.0",
